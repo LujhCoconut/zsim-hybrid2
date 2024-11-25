@@ -24,7 +24,8 @@ enum Scheme
    HybridCache,
    NoCache,
    CacheOnly,
-   Tagless
+   Tagless,
+   Hybrid2
 };
 
 class Way
@@ -128,7 +129,65 @@ public:
 	MemObject ** _mcdram;
 	uint32_t _mcdram_per_mc;
 	g_string _mcdram_type;
-	
+	// ----------------------------------------------------------
+	//【newAddition】 新增Hybrid2。
+	MemObject ** _cachehbm;
+	uint32_t _cache_hbm_per_mc;
+	g_string _cache_hbm_type;
+	uint64_t _cache_hbm_size;
+
+	MemObject ** _memhbm;
+	uint32_t _mem_hbm_per_mc;
+	g_string _mem_hbm_type;
+	uint64_t _mem_hbm_size;
+	uint64_t hbm_set_num;
+
+	int set_assoc_num;
+	uint32_t _hybrid2_page_size;
+	uint32_t _hybrid2_blk_size;
+	uint32_t hybrid2_blk_per_page = _hybrid2_page_size / _hybrid2_blk_size;
+	// Hybrid2论文的XTA
+	// 论文中包括缓存必要字段tag,LRUstate,有效标记，脏标记
+	struct XTAEntry{
+		uint64_t _hybrid2_tag;
+		uint64_t _hybrid2_LRU;
+		// 不在这里固定数组大小
+		int* bit_vector;
+		int* dirty_vector;
+		// int bit_vector[hybrid2_blk_per_page];
+		// int dirty_vector[hybrid2_blk_per_page];
+		uint64_t _hybrid2_counter;
+		uint64_t _hbm_tag;
+		uint64_t _dram_tag;
+		XTAEntry() : _hybrid2_counter(0) {}
+	};
+
+	// 在这里需要初始化一个XTA，在XTA的设计中：一个Set就有一个XTAEntries，
+	// 每个XTAEntries对应多个页面的XTAEntry
+	// 因此最终的XTA由一个两层vector结构包含 
+	std::vector<std::vector<XTAEntry>> XTA;
+
+	// 代表内存是否被占用
+	std::vector<std::vector<int>> memory_occupied;
+
+
+	// 迁移映射表
+	// 假设Workflow是[ XTAHit-Cacheline Miss]
+	// 先查一边哈希表，没有直接根据地址范围判断介质，有的话根据哈希表返回地址判断介质
+	// 再返回延迟。
+	// 这个MTable是否要设置容量呢？不用，根据内存访问erase没用的应该就行
+	// 需要更仔细地考虑合理性
+	std::unordered_map<uint64_t,uint64_t> HBMTable;
+	std::unordered_map<uint64_t,uint64_t> DRAMTable;
+
+	uint64_t get_set_id(uint64_t addr);
+	uint64_t get_page_id(uint64_t addr);
+	std::vector<XTAEntry>& find_XTA_set(uint64_t set_id);
+	int ret_lru_page(std::vector<XTAEntry> SETEntries);
+	int check_set_full(std::vector<XTAEntry> SETEntries);
+
+	// ----------------------------------------------------------
+
 	uint64_t getNumRequests() { return _num_requests; };
    	uint64_t getNumSets()     { return _num_sets; };
    	uint32_t getNumWays()     { return _num_ways; };
@@ -212,6 +271,7 @@ private:
 public:
 	MemoryController(g_string& name, uint32_t frequency, uint32_t domain, Config& config);
 	uint64_t access(MemReq& req);
+	uint64_t hybrid2_access(MemReq& req);
 	const char * getName() { return _name.c_str(); };
 	void initStats(AggregateStat* parentStat); 
 	// Use glob mem

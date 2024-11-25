@@ -7,6 +7,12 @@
 #include "ddr_mem.h"
 #include "zsim.h"
 
+/**
+ * 【newAddition】
+ * hybird2 复现思路：简单点设计的话，直接设置三种内存：cache_hbm,memory_hbm,ext_dram。
+ * cache_hbm,memory_hbm 接收部分mc_dram的参数，或者重新设计一个cfg。
+ */
+
 MemoryController::MemoryController(g_string& name, uint32_t frequency, uint32_t domain, Config& config)
 	: _name (name)
 {
@@ -58,6 +64,8 @@ MemoryController::MemoryController(g_string& name, uint32_t frequency, uint32_t 
 		_scheme = Tagless;
 		_next_evict_idx = 0;
 		_footprint_size = config.get<uint32_t>("sys.mem.mcdram.footprint_size");
+	}else if (scheme == "Hybrid2"){ // 【newAddition】新增hybird2模式接口
+		_scheme = Hybrid2;
 	}
 	else { 
 		printf("scheme=%s\n", scheme.c_str());
@@ -97,7 +105,7 @@ MemoryController::MemoryController(g_string& name, uint32_t frequency, uint32_t 
 	} else 
         panic("Invalid memory controller type %s", _ext_type.c_str());
 
-	if (_scheme != NoCache) {		
+	if (_scheme != NoCache && _scheme != Hybrid2) {		
 		// Configure the MC-Dram (Timing Model)
 		_mcdram_per_mc = config.get<uint32_t>("sys.mem.mcdram.mcdramPerMC", 4);
 		//_mcdram = new MemObject * [_mcdram_per_mc];
@@ -160,6 +168,78 @@ MemoryController::MemoryController(g_string& name, uint32_t frequency, uint32_t 
 	if (_scheme == HybridCache) {
 		_tag_buffer = (TagBuffer *) gm_malloc(sizeof(TagBuffer));	
 		new (_tag_buffer) TagBuffer(config);
+	}
+	if (_scheme == Hybrid2){ //【newAddition】 新增Hybrid2。此处代码接收2种类型的参数
+		// 这样的设计就只有通道没有伪通道的概念
+		// HBM通道数设置，按照道理来说应该是需要保持一致的
+		_cache_hbm_per_mc = config.get<uint32_t>("sys.mem.cachehbm.cacheHBMPerMC", 4);
+		_mem_hbm_per_mc = config.get<uint32_t>("sys.mem.memhbm.memHBMPerMC", 4);
+		// 用作cache的HBM和用作memory的HBM设置
+		_cachehbm = (MemObject **) gm_malloc(sizeof(MemObject *) * _cache_hbm_per_mc);
+		_memhbm = (MemObject **) gm_malloc(sizeof(MemObject *) * _mem_hbm_per_mc);
+		// 把大小也传进来,主要是传进来memhbm大小，这样可以根据lineAddr判断在哪一个内存介质
+		_cache_hbm_size = config.get<uint64_t>("sys.mem.cachehbm.size",64)*1024*1024;// Default:64MB
+		_mem_hbm_size = config.get<uint64_t>("sys.mem.memhbm.size",1024)*1024*1024;// Default:1GB
+		// 目前假定这里的hbm的type都是ddr类型,循环创建cacheHBM
+		for (uint32_t i = 0; i < _cache_hbm_per_mc ; i++){
+			g_string cachehbm_name = _name + g_string("-cachehbm-") + g_string(to_string(i).c_str());
+			if (_cache_hbm_type == "DDR"){
+				uint32_t latency = config.get<uint32_t>("sys.mem.cachehbm.latency", 50);
+				_cachehbm[i] = BuildDDRMemory(config, frequency, domain, cachehbm_name, "sys.mem.cachedram.", 4, timing_scale);
+			}else{
+				//TODO
+			}
+		}
+		// 目前假定这里的hbm的type都是ddr类型,循环创建memHBM
+		for (uint32_t i = 0; i < _mem_hbm_per_mc ; i++){
+			g_string memhbm_name = _name + g_string("-memhbm-") + g_string(to_string(i).c_str());
+			if (_mem_hbm_type == "DDR"){
+				uint32_t latency = config.get<uint32_t>("sys.mem.memhbm.latency", 50);
+				_memhbm[i] = BuildDDRMemory(config, frequency, domain, memhbm_name, "sys.mem.memdram.", 4, timing_scale);
+			}else{
+				//TODO
+			}
+		}
+
+		// 这里使用std::vector存储XTAEntry
+		// XTAEntries的数量为set的数量
+		// set的数量计算公式为_cache_hbm_size / (set_assoc_num * _hybrid2_page_size)
+		// 即以page为粒度管理
+		// 问题求解逻辑为 CacheHBM大小 一个set 可以映射 set_assoc_num 个 page-size大小的page
+		// 问你需要多少个set
+		_hybrid2_page_size = config.get<uint32_t>("sys.mem.pagesize", 4)*1024; // in Bytes
+		_hybrid2_blk_size = config.get<uint32_t>("sys.mem.blksize", 64); // in Bytes
+		hybrid2_blk_per_page = _hybrid2_page_size / _hybrid2_blk_size;
+		set_assoc_num = config.get<int>("sys.mem.cachehbm.setnum",8);// Default:8
+		hbm_set_num = _cache_hbm_size / (set_assoc_num * _hybrid2_page_size);
+		// 循环创建XTAEntry
+		assert(hbm_set_num > 0);
+		for(int i = 0 ; i<hbm_set_num ; ++i){
+			// 初始化一个set对应的XTAEntries,共有hbm_set_num个
+			std::vector<XTAEntry> entries;
+			
+			// 循环初始化XTAEntry,一个set固定set_assoc_num个page
+			for(int j = 0; j < set_assoc_num;j++){
+				XTAEntry tmp_entry;
+				tmp_entry._hybrid2_tag = -1;
+				tmp_entry._hbm_tag = -1;
+				tmp_entry._dram_tag = -1;
+				tmp_entry._hybrid2_LRU = 0; //LRU的逻辑应该有其它的设置方式，目前暂时先不考虑
+				tmp_entry._hybrid2_counter = 0;
+				// 还剩下2个vector需要设置，先对指针数组初始化
+				int* bit_vector = (int*)malloc(hybrid2_blk_per_page * sizeof(int));
+				int* dirty_vector = (int*)malloc(hybrid2_blk_per_page * sizeof(int));
+				for (int k = 0; k < hybrid2_blk_per_page; k++) {
+					bit_vector[k] = 0;  
+					dirty_vector[k] = 0; 
+				}
+				// 假设组相联数为8 这里会将8个页面对应的XTAEntry加入XTAEntries(SetEntries更准确一点)
+				entries.push_back(tmp_entry);
+			}
+			// SetEntries加入XTA
+			XTA.push_back(entries);
+		}
+
 	}
  	// Stats
    _num_hit_per_step = 0;
@@ -231,6 +311,14 @@ MemoryController::access(MemReq& req)
 	uint64_t data_ready_cycle = req.cycle;
     MESIState state;
 
+	//【newAddition】 新增Hybrid2相关参数
+	// type 和 address 无需修改 ， _mem_hbm_size 与 address 协同判断请求应该去哪一个内存介质
+	// 暂时不知道写这个的意义是什么
+	uint32_t cache_hbm_select = (address / 64) % _cache_hbm_per_mc;
+	Address cache_hbm_address = (address / 64 /_cache_hbm_per_mc * 64) | (address % 64); 
+
+
+
 	if (_scheme == CacheOnly) {
 		///////   load from mcdram
 		req.lineAddr = mc_address;
@@ -285,9 +373,9 @@ MemoryController::access(MemReq& req)
 		}
 		if (_scheme == HybridCache && _sram_tag)
 			req.cycle += _llc_latency;
- 	}
-   	else {
-		assert(_scheme == AlloyCache);
+ 	} 
+   	else if (_scheme == AlloyCache){  //这里从else 变为 else if 
+		// assert(_scheme == AlloyCache);
 		if (_cache[set_num].ways[0].valid && _cache[set_num].ways[0].tag == tag && set_num >= _ds_index) 
 			hit_way = 0;
 		if (type == LOAD && set_num >= _ds_index) { 
@@ -312,7 +400,15 @@ MemoryController::access(MemReq& req)
 			}
 			///////////////////////////////
 		}
-   	}
+   	}else{
+		// 这里目前是只能是hybrid2,暂时先assert
+		// 按理来说这段代码应该解耦出去，但是不知道有哪些地方调用了这个access，改动代价较高
+		// 但是也可以尝试
+		// 解锁操作移动到hybrid2_access
+		assert(_scheme == Hybrid2);
+		// 重新写一个访问函数
+		return hybrid2_access(req);
+	}
 	bool cache_hit = hit_way != _num_ways;
 	
 	//orig_cycle = req.cycle; 
@@ -746,6 +842,92 @@ MemoryController::access(MemReq& req)
 	return data_ready_cycle; //req.cycle + latency;
 }
 
+/**
+ * XTA Hit > return hbm_latency
+ * XTA Miss Case HBM : return hbm_latency + hbm_latncy
+ * XTA Miss Case DRAM : return hbm_latency + dram_latncy
+ * 都可以通过DDRMemory::access获得延迟
+ * 问题在于：是否还存在别的什么延迟？TODO
+ */
+uint64_t
+MemoryController::hybrid2_access(MemReq& req)
+{
+	assert(_scheme == Hybrid2);
+	switch (req.type) {
+        case PUTS:
+        case PUTX:
+            *req.state = I;
+            break;
+        case GETS:
+            *req.state = req.is(MemReq::NOEXCL)? S : E;
+            break;
+        case GETX:
+            *req.state = M;
+            break;
+        default: panic("!?");
+    }
+	// 干净数据，不会改变块的状态
+	if (req.type == PUTS){
+		return req.cycle;
+	}
+	// futex_unlock(&_lock); 这里的执行已经持有了这把锁，由于在access中直接返回
+	// 在本回合（快要）结束（的某个时机），需要释放这把锁
+
+	// 请求状态
+	ReqType type = (req.type == GETS || req.type == GETX)? LOAD : STORE;
+	// 表示的地址
+	Address address = req.lineAddr;
+	// HBM在这里需要自己考虑分到哪一个通道，但是ZSim不太涉及请求排队
+
+	// address在哪一个page，在page第几个block
+	// 保证内存对齐
+	uint64_t page_addr = (address / _hybrid2_page_size) * _hybrid2_page_size;
+	// uint64_t blk_offset = (address - page_addr*_hybrid2_page_size) / _hybrid2_blk_size;
+	// 先计算页内偏移再按block对齐
+	uint64_t blk_offset = ((address % _hybrid2_page_size) / _hybrid2_blk_size) * _hybrid2_blk_size;
+
+	// 根据程序的执行流，先访问XTA
+	// 根据XTA的两层结构，应该先找到set，再找到Page
+	// 所以需要先封装一个获取set的函数以降低耦合度
+	uint64_t set_id = get_set_id(address);
+	std::vector<XTAEntry> SETEntries = find_XTA_set(set_id);
+	// 遍历 这个SET
+	bool if_XTA_hit = false;
+
+
+	
+}
+
+// 这段代码写的分类，实际上没这个必要，但是为了以后有可能改assoc，预留了分类
+uint64_t
+MemoryController::get_set_id(uint64_t addr)
+{
+	if(addr < _mem_hbm_size)
+	{
+		uint64_t pg_id = get_page_id(addr);
+		return pg_id %  hbm_set_num;
+	}else // 按照内存无限的假定，可以有模拟器设置global memory
+	{
+		assert(addr >= _mem_hbm_size);
+		uint64_t pg_id = get_page_id(addr);
+		return pg_id %  hbm_set_num;
+	}
+}
+
+uint64_t
+MemoryController::get_page_id(uint64_t addr)
+{
+	return addr / _hybrid2_page_size;
+}
+
+std::vector<MemoryController::XTAEntry>
+MemoryController::find_XTA_set(uint64_t set_id)
+{
+	assert(set_id < XTA.size() && set_id >= 0);
+	return XTA[set_id];
+}
+
+
 DDRMemory* 
 MemoryController::BuildDDRMemory(Config& config, uint32_t frequency, 
 								 uint32_t domain, g_string name, const string& prefix, uint32_t tBL, double timing_scale) 
@@ -770,7 +952,8 @@ MemoryController::BuildDDRMemory(Config& config, uint32_t frequency,
 
     auto mem = (DDRMemory *) gm_malloc(sizeof(DDRMemory));
 	new (mem) DDRMemory(zinfo->lineSize, pageSize, ranksPerChannel, banksPerRank, frequency, tech, addrMapping, controllerLatency, queueDepth, maxRowHits, deferWrites, closedPage, domain, name, tBL, timing_scale);
-    return mem;
+    printf("GET MEM INFO : %d %d",zinfo->lineSize, pageSize);
+	return mem;
 }
 
 void 
@@ -962,3 +1145,4 @@ TagBuffer::clearTagBuffer()
 		}
 	}
 }
+

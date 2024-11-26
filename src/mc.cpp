@@ -6,7 +6,7 @@
 #include "dramsim_mem_ctrl.h"
 #include "ddr_mem.h"
 #include "zsim.h"
-
+#include <algorithm>
 /**
  * 【newAddition】
  * hybird2 复现思路：简单点设计的话，直接设置三种内存：cache_hbm,memory_hbm,ext_dram。
@@ -227,17 +227,31 @@ MemoryController::MemoryController(g_string& name, uint32_t frequency, uint32_t 
 				tmp_entry._hybrid2_LRU = 0; //LRU的逻辑应该有其它的设置方式，目前暂时先不考虑
 				tmp_entry._hybrid2_counter = 0;
 				// 还剩下2个vector需要设置，先对指针数组初始化
-				int* bit_vector = (int*)malloc(hybrid2_blk_per_page * sizeof(int));
-				int* dirty_vector = (int*)malloc(hybrid2_blk_per_page * sizeof(int));
+				tmp_entry.bit_vector = (int*)malloc(hybrid2_blk_per_page * sizeof(int));
+				tmp_entry.dirty_vector = (int*)malloc(hybrid2_blk_per_page * sizeof(int));
 				for (int k = 0; k < hybrid2_blk_per_page; k++) {
-					bit_vector[k] = 0;  
-					dirty_vector[k] = 0; 
+					tmp_entry.bit_vector[k] = 0;  
+					tmp_entry.dirty_vector[k] = 0; 
 				}
 				// 假设组相联数为8 这里会将8个页面对应的XTAEntry加入XTAEntries(SetEntries更准确一点)
 				entries.push_back(tmp_entry);
 			}
 			// SetEntries加入XTA
 			XTA.push_back(entries);
+		}
+
+		// 循环初始化DRAM HBM内存占用情况
+		for(int i=0; i < hbm_set_num; i++)
+		{
+			std::vector<int> SETEntries_occupied; 
+			memory_occupied.push_back(SETEntries_occupied);
+			// 按理来说是还有dram—_pages_per_set的 但是这里假设了DRAM空间无限大，怎么写需要考虑，TODO
+			// 暂时设置一个DRAM大小比例吧，后续可调
+			int x = 8;
+			for(int j = 0; j < (1+x)*hbm_pages_per_set ; j++)
+			{
+				memory_occupied[i].push_back(0);
+			}
 		}
 
 	}
@@ -843,11 +857,8 @@ MemoryController::access(MemReq& req)
 }
 
 /**
- * XTA Hit > return hbm_latency
- * XTA Miss Case HBM : return hbm_latency + hbm_latncy
- * XTA Miss Case DRAM : return hbm_latency + dram_latncy
- * 都可以通过DDRMemory::access获得延迟
- * 问题在于：是否还存在别的什么延迟？TODO
+ * Todo List:
+ * 1. Specific Memory Access Latency
  */
 uint64_t
 MemoryController::hybrid2_access(MemReq& req)
@@ -884,18 +895,276 @@ MemoryController::hybrid2_access(MemReq& req)
 	uint64_t page_addr = (address / _hybrid2_page_size) * _hybrid2_page_size;
 	// uint64_t blk_offset = (address - page_addr*_hybrid2_page_size) / _hybrid2_blk_size;
 	// 先计算页内偏移再按block对齐
-	uint64_t blk_offset = ((address % _hybrid2_page_size) / _hybrid2_blk_size) * _hybrid2_blk_size;
+	uint64_t blk_addr = ((address % _hybrid2_page_size) / _hybrid2_blk_size) * _hybrid2_blk_size;
+	uint64_t blk_offset = (address % _hybrid2_page_size) / _hybrid2_blk_size;
 
 	// 根据程序的执行流，先访问XTA
 	// 根据XTA的两层结构，应该先找到set，再找到Page
 	// 所以需要先封装一个获取set的函数以降低耦合度
 	uint64_t set_id = get_set_id(address);
-	std::vector<XTAEntry> SETEntries = find_XTA_set(set_id);
+	std::vector<XTAEntry>& SETEntries = find_XTA_set(set_id);
 	// 遍历 这个SET
 	bool if_XTA_hit = false;
+	bool is_dram = address >= _mem_hbm_size;
+
+	// 为HBMTable服务，在迁移或逐出阶段，对于可能在HBM或remap到DRAM的数据使用
+	uint64_t avg_temp = 0;
+	uint64_t low_temp = 100000;
 
 
-	
+	// TODO 接下来我就是在SETEntries里找，看看能不能找到那个page,找到了就是XTAHit，否则就是XTAMiss
+	// 找的逻辑是根据地址去找，匹配_hybrid2_tag
+	for(int i = 0; i < set_assoc_num ; i++)
+	{
+		if(SETEntries[i]._hybrid2_counter > 0)
+		{
+			low_temp = low_temp > SETEntries[i]._hybrid2_counter ? SETEntries[i]._hybrid2_counter : low_temp;
+		}
+		avg_temp += SETEntries[i]._hybrid2_counter;
+		// 这一部分我觉得是hybrid2_tag匹配的是page的地址,存疑
+		if(page_addr == SETEntries[i]._hybrid2_tag)
+		{
+			// 表示 XTA Hit 了
+			if_XTA_hit = true;
+			// XTA Hit 意味着 Page也hit了，page hit 但是cacheline 不一定hit
+			// 首先把LRU的值先改了,本Page LRU置为0，其余计数器+1，这里可以解耦一个计算最小最大LRU的函数
+			for(int j = 0; j < set_assoc_num ; j++)
+			{
+				SETEntries[j]._hybrid2_LRU++;
+			}
+			SETEntries[i]._hybrid2_LRU = 0;
+			SETEntries[i]._hybrid2_counter += 1;
+			int exist = SETEntries[i].bit_vector[blk_offset]; // 0 代表cacheline miss 1 代表 cacheline hit
+			if(exist)
+			{
+				// 访问HBM,TODO
+			}else{
+				// 这里也有两种情况。Case1:有可能在DRAM里；Case2：有可能在HBM里
+				// 两种情况都有可能出现remap的情况
+				
+				// 有可能是dram,有可能remap到hbm
+				if(address > _mem_hbm_size)
+				{
+					//检查DRAMTable有没有存映射
+					auto it = DRAMTable.find(address);
+					if(it == DRAMTable.end())
+					{
+						// 访问DRAM,TODO
+					}else{
+						uint64_t dest_address = it->second;
+						// 访问HBM,TODO
+					}
+				}else{// 否则有可能是HBM,但也有可能是remap到DRAM   
+					auto it = HBMTable.find(address);
+					if(it == HBMTable.end())
+					{
+						// 访问HBM，TODO
+					}else{
+						uint64_t dest_address = it->second;
+						// 访问DRAM,TODO
+					}
+				}
+			}
+		}
+	}
+
+	avg_temp = avg_temp / set_assoc_num;
+
+	// XTA Miss 掉	
+	if(!if_XTA_hit)
+	{
+		// 根究 address 找到set 把set里的page 根据LRU值淘汰一个
+		// 这个set 已经由之前的引用类型获得
+		// 这里的address都有可能在remaptable里
+		int empty_idx = check_set_full(SETEntries);
+		uint64_t lru_idx = ret_lru_page(SETEntries);
+
+		// 表示没有空的，那就LRU干掉一个,这就有空的了
+		// 被LRU干掉的数据根据迁移代价计算公式迁移到对应的内存介质
+		// 基于ZSim的工作原理，流程都简化到两个RemapTable 以表示数据驱逐的地方
+		if(-1 == empty_idx) 
+		{
+			uint64_t cache_blk_num = 0;
+			uint64_t dirty_blk_num = 0;
+
+			for(int k = 0; k < hybrid2_blk_per_page; k++)
+			{
+				if(SETEntries[lru_idx].bit_vector[k])cache_blk_num ++ ;
+				if(SETEntries[lru_idx].dirty_vector[k])dirty_blk_num ++ ;
+			}
+			uint64_t migrate_cost = 2 * hybrid2_blk_per_page - cache_blk_num + 1;
+			uint64_t evict_cost = dirty_blk_num;
+			uint64_t net_cost = migrate_cost - evict_cost;
+			
+			uint64_t tmp_hybrid2_tag =  SETEntries[lru_idx]._hybrid2_tag;
+			uint64_t tmp_hbm_tag = SETEntries[lru_idx]._hbm_tag;
+			uint64_t tmp_dram_tag = SETEntries[lru_idx]._dram_tag;
+			uint64_t heat_counter = SETEntries[lru_idx]._hybrid2_counter;
+			
+			
+			bool migrate_init_dram = false;
+			bool migrate_init_hbm = false;
+			bool migrate_final_hbm = false;
+			bool migrate_final_dram = false;
+
+
+			// 是否迁移或逐出
+			// 这一段是可能原来就在DRAM，或者被remap进HBM的部分
+			// remap进HBM的部分，要是这部分数据不太热就踢出去
+			if(address >= _mem_hbm_size)
+			{
+				migrate_init_dram = true;
+				auto it = DRAMTable.find(address);
+				if(it != DRAMTable.end())
+				{
+					migrate_init_dram = false;
+					migrate_final_hbm = true;
+				}
+
+				// 如果迁移代价不高且原来就在DRAM里，就迁移
+				if(migrate_init_dram && heat_counter > net_cost)
+				{
+					// 一直就在DRAM就加个映射
+					// 依然是基于ZSim只需要返回延迟的假设，简单地映射到HBM就结束了
+					DRAMTable[address] = address % _mem_hbm_size;
+				}
+
+				// 否则就驱逐
+				if(heat_counter <= net_cost)
+				{
+					// 可能是被映射进HBM的
+					if(migrate_final_hbm)
+					{
+						// 解除映射
+						DRAMTable.erase(address);
+					}// 否则什么也不用做
+				}
+
+			}
+
+			// 这一段是原来可能在HBM的部分，但是也有可能被remap进DRAM
+			// 在HBM的话，只要数据比其它页面都冷就remap到DRAM（相当于踢掉）
+			// 被remap进DRAM的话，只要数据比页面平均温度更热，就erase这个映射，相当于保持在HBM里
+			if(address < _mem_hbm_size)
+			{
+				migrate_init_hbm = true;
+				auto it = HBMTable.find(address);
+				if(it != HBMTable.end())
+				{
+					migrate_init_hbm = false;
+					migrate_final_dram = true;
+				}
+				
+				// 最冷数据去掉了空数据（合理性待考察）
+				if(migrate_init_hbm && heat_counter < low_temp)
+				{
+					// 映射到DRAM
+					HBMTable[address] = address + (address % 7 + 1) * _mem_hbm_size;
+				}
+
+				// 温热数据就留在HBM了
+				if(migrate_final_dram && heat_counter >= avg_temp)
+				{
+					HBMTable.erase(address);
+				}
+				
+			}
+
+
+			// 置空
+			SETEntries[lru_idx]._hybrid2_tag = -1;
+			SETEntries[lru_idx]._hbm_tag = -1;
+			SETEntries[lru_idx]._dram_tag = -1;
+			SETEntries[lru_idx]._hybrid2_LRU = 0;
+			SETEntries[lru_idx]._hybrid2_counter = 0;
+			for (int k = 0; k < hybrid2_blk_per_page; k++) 
+			{
+					SETEntries[lru_idx].bit_vector[k] = 0;  
+					SETEntries[lru_idx].dirty_vector[k] = 0; 
+			}
+			empty_idx = lru_idx;
+		}
+
+		
+		if(-1 != empty_idx) // 表示有空的，且一定不是-1
+		{
+			SETEntries[empty_idx]._hybrid2_tag = get_page_id(address);
+			SETEntries[empty_idx]._hybrid2_LRU = 0;
+			SETEntries[empty_idx]._hybrid2_counter = 0;
+			SETEntries[empty_idx]._hybrid2_counter += 1;
+			// SETEntries[empty_idx].bit_vector[blk_offset] = 1; //这行修改的位置可能需要调整，理论上会出现一致性问题
+			// 剩余需要根据address和remapTable进行更新
+
+			uint64_t dest_blk_address = -1;
+			bool is_dram = false;
+			bool is_remapped = false;
+
+			if(address > _mem_hbm_size)
+			{ //可能是dram，但也有可能是被remap的
+				SETEntries[empty_idx]._dram_tag = get_page_id(address);
+				dest_blk_address = address;
+				is_dram = true;
+				// 看看有没有remap，有就更新，没有就不更新
+				auto it = DRAMTable.find(address);
+				if(it != DRAMTable.end()) // 就说明有对吧
+				{
+					SETEntries[empty_idx]._hbm_tag = get_page_id(it->second);
+					dest_blk_address = it->second;
+					is_dram = false;
+					is_remapped = true;
+				}
+			}
+			else // 否则有可能是HBM，有可能remap到dram
+			{
+				assert(address > 0);
+				SETEntries[empty_idx]._hbm_tag = get_page_id(address);
+				dest_blk_address = address;
+				auto it = HBMTable.find(address);
+				if(it != HBMTable.end()) // 就说明有对吧
+				{
+					SETEntries[empty_idx]._dram_tag = get_page_id(it->second);
+					dest_blk_address = it->second;
+					is_dram = true;
+					is_remapped = true;
+				}			
+			}
+
+
+			// 这个时候基本的XTAEntry已经完成了，还差两个blk_vector
+			// 看看dest_blk_address在哪里
+			if(!is_dram){// 在HBM,只需访问HBM对应的blk
+				
+				// 访问HBM,TODO
+				
+				// 更新XTA
+				SETEntries[empty_idx]._hybrid2_counter += 1;
+				SETEntries[empty_idx].bit_vector[blk_offset] = 1;
+
+			}
+			else // 在DRAM
+			{ 
+				
+				// 访问DRAM,TODO
+
+				// 从DRAM写到HBM
+				// 现在是Page有空的，然后原来的数据是在DRAM，所以DRAMTable需要更新进去这个remap,已经remap就无需管
+				if(!is_remapped)
+				{
+					// 在ZSim中是否由于access只返回访问对应内存介质access的延迟，而不会产生实际的修改内存操作
+					// 基于这样的设想，我是否只需要remap到HBM的对应set的任何一个有效位置即可呢？
+					// 再更新XTA
+					uint64_t dest_hbm_addr = address % _mem_hbm_size;
+					DRAMTable[address] = dest_hbm_addr;
+					SETEntries[empty_idx]._hybrid2_counter += 1;
+					SETEntries[empty_idx].bit_vector[blk_offset] = 1;
+				}
+			}
+
+		}
+
+	}
+
+
 }
 
 // 这段代码写的分类，实际上没这个必要，但是为了以后有可能改assoc，预留了分类
@@ -920,11 +1189,42 @@ MemoryController::get_page_id(uint64_t addr)
 	return addr / _hybrid2_page_size;
 }
 
-std::vector<MemoryController::XTAEntry>
+std::vector<MemoryController::XTAEntry>&
 MemoryController::find_XTA_set(uint64_t set_id)
 {
 	assert(set_id < XTA.size() && set_id >= 0);
 	return XTA[set_id];
+}
+
+int
+MemoryController::ret_lru_page(std::vector<XTAEntry> SETEntries)
+{
+	int max_lru = -2;// 默认值可能是-1
+	int max_idx = -1;
+	for(int i = 0; i < SETEntries.size(); i++)
+	{
+		if(max_lru < SETEntries[i]._hybrid2_LRU)
+		{
+			max_lru = SETEntries[i]._hybrid2_LRU;
+			max_idx = i;
+		}
+	}
+	assert(max_idx != -1);
+	return max_idx;
+}
+
+int
+MemoryController::check_set_full(std::vector<XTAEntry> SETEntries)
+{
+	int empty_idx = -1;
+	for(int i = 0; i < SETEntries.size(); i++)
+	{
+		if(-1 == SETEntries[i]._hybrid2_tag)
+		{
+			empty_idx = i;
+		}
+	}
+	return empty_idx;
 }
 
 

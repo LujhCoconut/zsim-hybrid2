@@ -133,6 +133,8 @@ public:
 	g_string _mcdram_type;
 	// ----------------------------------------------------------
 	//【newAddition】 新增Hybrid2。
+	// DDRMemory * test_mem;
+
 	MemObject ** _cachehbm;
 	uint32_t _cache_hbm_per_mc;
 	g_string _cache_hbm_type;
@@ -148,7 +150,7 @@ public:
 	uint32_t set_assoc_num;
 	uint32_t _hybrid2_page_size;
 	uint32_t _hybrid2_blk_size;
-
+	uint32_t reserved_memory_size = 1024*1024*1024; //测试1GB 似乎没问题
 
 	// 1GB -> (2KB PAGE) 512Pages 8pages->1set (非顺序) 512/8 = 64pages
 	uint64_t hbm_pages_per_set; 
@@ -208,11 +210,14 @@ public:
 	uint64_t get_set_id(uint64_t addr);
 	uint64_t get_page_id(uint64_t addr);
 	g_vector<XTAEntry>& find_XTA_set(uint64_t set_id);
-	int ret_lru_page(g_vector<XTAEntry> SETEntries);
+	uint64_t ret_lru_page(g_vector<XTAEntry> SETEntries);
 	int check_set_full(g_vector<XTAEntry> SETEntries);
 	Address vaddr_to_paddr(MemReq req);
+	Address paddr_to_vaddr(Address pLineAddr);
 	Address handle_low_address(Address addr);
-	
+	bool is_hbm(MemReq req);
+	uint64_t random_hybrid2_access(MemReq req);
+	uint64_t hbm_hybrid2_access(MemReq req);
 	// 不使用页表和MMU TLB进行地址转换，简单采用模运算进行固定映射
 	uint64_t phy_mem_size;
 	// uint64_t page_size;

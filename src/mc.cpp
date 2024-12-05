@@ -12,8 +12,15 @@
 #include <random>
 
 /**
- * Amazing bug here:
- * This Constricution Function is failed to Execuate after I adding some code about hybrid2 !!
+ * Complete the code. Pass the basic test.
+ * There are stll somed details to be considered:
+ * 1) Should MESI states change again when they come into function ?
+ * 2) Bit Computing should be token into consideration later.
+ * 3) Lots of operation has been invovled into `looking up hash table`, which perhaps making the performance slowdown.
+ * 
+ * Although this project can run smoothly, there still a problem I can not understand:
+ * 1) Why _memhbm occurs INVALID-ADDRESS-ACCESS bug, while _mcdram does not. They are almost the same.\
+ * 
  */
 MemoryController::MemoryController(g_string& name, uint32_t frequency, uint32_t domain, Config& config)
 	: _name (name)
@@ -122,7 +129,7 @@ MemoryController::MemoryController(g_string& name, uint32_t frequency, uint32_t 
 	        	//_mcdram[i] = new SimpleMemory(latency, mcdram_name, config);
 			} else if (_mcdram_type == "DDR") {
 				// XXX HACK tBL for mcdram is 1, so for data access, should multiply by 2, for tad access, should multiply by 3. 
-        		_mcdram[i] = BuildDDRMemory(config, frequency, domain, mcdram_name, "sys.mem.mcdram.", 4, timing_scale);
+        		_mcdram[i] = BuildDDRMemory(config, frequency, domain, mcdram_name, "sys.mem.mcdram.", 1, timing_scale);
 			} else if (_mcdram_type == "MD1") {
 				uint32_t latency = config.get<uint32_t>("sys.mem.mcdram.latency", 50);
         		uint32_t bandwidth = config.get<uint32_t>("sys.mem.mcdram.bandwidth", 12800);
@@ -185,13 +192,14 @@ MemoryController::MemoryController(g_string& name, uint32_t frequency, uint32_t 
 		_cache_hbm_type = config.get<const char*>("sys.mem.cachehbm.type","DDR");
 		_mem_hbm_type = config.get<const char*>("sys.mem.memhbm.type","DDR");
 
-
+		// 所有_memhbm被替换为_mcdram 以避免未知错误
+		// 请注意将_mcdram和_mchbm的配置文件进行统一，以避免不会暴露的bug
 		_mcdram_per_mc = config.get<uint32_t>("sys.mem.mcdram.mcdramPerMC", 4);
 		_mcdram = (MemObject **) gm_malloc(sizeof(MemObject *) * _mcdram_per_mc);
 		for (uint32_t i = 0; i < _mcdram_per_mc; i++)
 		{
 			g_string mcdram_name = _name + g_string("-mc-") + g_string(to_string(i).c_str());
-			_mcdram[i] = BuildDDRMemory(config, frequency, domain, mcdram_name, "sys.mem.mcdram.", 4, timing_scale);
+			_mcdram[i] = BuildDDRMemory(config, frequency, domain, mcdram_name, "sys.mem.mcdram.", 1, timing_scale);
 		}
 
 		// // 目前假定这里的hbm的type都是ddr类型,循环创建memHBM
@@ -338,7 +346,7 @@ MemoryController::access(MemReq& req)
 		// std::cout << "Still ret req.cycle  00000  = " << hbm_hybrid2_access(req) <<std::endl;
 		req.cycle = hybrid2_access(req);
 		// std::cout << "Still ret req.cycle    11111 = " << req.cycle <<std::endl;
-		futex_unlock(&_lock);
+		// futex_unlock(&_lock); // 此处重复释放锁，涉及到锁的一致性问题。
 		return req.cycle;
 	}
 	
@@ -365,6 +373,7 @@ MemoryController::access(MemReq& req)
 
 	if (_scheme == CacheOnly) {
 		///////   load from mcdram
+		// std::cout << "Channel Select = " << mcdram_select << "  |||  CacheOnly req.lineAddr = " << req.lineAddr << std::endl;
 		req.lineAddr = mc_address;
  		req.cycle = _mcdram[mcdram_select]->access(req, 0, 4);
 		req.lineAddr = address;
@@ -889,18 +898,17 @@ MemoryController::access(MemReq& req)
 /**
  * Todo List:
  * 1. Specific Memory Access Latency [Need to Clarify ReqType]
- * 2. How to avoid access lower memory resevered address (e.g. 0-1MB,0-64KB,0-0xfff)
- *    > To Solve this problem, attempt to let pLineAddr += 1GB
+ * 2. req's parameters should be considered later.
  */
 uint64_t
 MemoryController::hybrid2_access(MemReq& req)
 {
 	assert(_scheme == Hybrid2);
 	// futex_lock(&_lock);
-	std::cout << std::hex << "vaddr:   0x" << req.lineAddr << std::endl;
+	// std::cout << std::hex << "vaddr:   0x" << req.lineAddr << std::endl;
 	Address tmpAddr = req.lineAddr;
 	req.lineAddr = vaddr_to_paddr(req);
-	std::cout << std::hex << "vaddr to paddr:   0x" <<  req.lineAddr << std::endl;
+	// std::cout << std::hex << "vaddr to paddr:   0x" <<  req.lineAddr << std::endl;
 	switch (req.type) {
         case PUTS:
         case PUTX:
@@ -931,7 +939,7 @@ MemoryController::hybrid2_access(MemReq& req)
 	// Address cache_hbm_address = (address / 64 /_cache_hbm_per_mc * 64) | (address % 64); 
 	assert(0 != _cache_hbm_per_mc);
 	uint32_t mem_hbm_select = (address / 64) % _cache_hbm_per_mc;
-	assert(4 > mem_hbm_select);
+	// assert(4 > mem_hbm_select);
 	Address mem_hbm_address = (address / 64 /_cache_hbm_per_mc * 64) | (address % 64); 
 
 	// address在哪一个page，在page第几个block
@@ -943,7 +951,7 @@ MemoryController::hybrid2_access(MemReq& req)
 	// 先计算页内偏移再按block对齐
 	// uint64_t blk_addr = ((address % _hybrid2_page_size) / _hybrid2_blk_size) * _hybrid2_blk_size; 
 	uint64_t blk_offset = (address % _hybrid2_page_size) / _hybrid2_blk_size;
-	std::cout << "blk_offset ==" << blk_offset << std::endl;
+	// std::cout << "blk_offset ==" << blk_offset << std::endl;
 
 	// 根据程序的执行流，先访问XTA
 	// 根据XTA的两层结构，应该先找到set，再找到Page
@@ -974,13 +982,13 @@ MemoryController::hybrid2_access(MemReq& req)
 		}
 		avg_temp += SETEntries[i]._hybrid2_counter;
 		// 这一部分我觉得是hybrid2_tag匹配的是page的地址,存疑
-		std::cout << "page_addr: " << page_addr << "    SETEntry.tag:  "<<  SETEntries[i]._hybrid2_tag << std::endl;
+		// std::cout << "page_addr: " << page_addr << "    SETEntry.tag:  "<<  SETEntries[i]._hybrid2_tag << std::endl;
 		if(page_addr == SETEntries[i]._hybrid2_tag)
 		{
-			std::cout << "SETEntries[i].bit_vector[blk_offset] (111)===" << SETEntries[i].bit_vector[blk_offset] << std::endl;
+			// std::cout << "SETEntries[i].bit_vector[blk_offset] (111)===" << SETEntries[i].bit_vector[blk_offset] << std::endl;
 			// 表示 XTA Hit 了
 			if_XTA_hit = true;
-			std::cout << "workflow come here :(XTA Hit)!" << std::endl;
+			// std::cout << "workflow come here :(XTA Hit)!" << std::endl;
 			// XTA Hit 意味着 Page也hit了，page hit 但是cacheline 不一定hit
 			// 首先把LRU的值先改了,本Page LRU置为0，其余计数器+1，这里可以解耦一个计算最小最大LRU的函数
 			for(uint64_t j = 0; j < set_assoc_num ; j++)
@@ -993,7 +1001,7 @@ MemoryController::hybrid2_access(MemReq& req)
 			int exist = SETEntries[i].bit_vector[blk_offset]; // 0 代表cacheline miss 1 代表 cacheline hit
 			if(exist)
 			{
-				std::cout << "exist[" << exist << "]workflow come here :(Cacheline Hit)!" << std::endl;
+				// std::cout << "exist[" << exist << "]workflow come here :(Cacheline Hit)!" << std::endl;
 				// 访问HBM,TODO
 				if(type == STORE)
 				{
@@ -1020,7 +1028,7 @@ MemoryController::hybrid2_access(MemReq& req)
 					return total_latency;
 				}
 			}else{
-				std::cout << "exist[" << exist << "]workflow come here :(Cacheline Miss)!" << std::endl;
+				// std::cout << "exist[" << exist << "]workflow come here :(Cacheline Miss)!" << std::endl;
 				// 这里也有两种情况。Case1:有可能在DRAM里；Case2：有可能在HBM里
 				// 两种情况都有可能出现remap的情况
 				
@@ -1034,8 +1042,9 @@ MemoryController::hybrid2_access(MemReq& req)
 						// assert(it != DRAMTable.end());
 						// 访问DRAM,TODO
 						req.cycle = _ext_dram->access(req,0,4);
+						req.lineAddr = tmpAddr;
 						total_latency += req.cycle;
-						std::cout << "workflow over here (XTA Hit ,is dram)!!" << std::endl;
+						// std::cout << "workflow over here (XTA Hit ,is dram)!!" << std::endl;
 						futex_unlock(&_lock);
 						return total_latency;
 					}else{
@@ -1050,7 +1059,7 @@ MemoryController::hybrid2_access(MemReq& req)
 						req.lineAddr = tmpAddr;
 						total_latency += req.cycle;
 						futex_unlock(&_lock);
-						std::cout << "workflow over here (XTA Hit ,is dram remapping to hbm)!!" << std::endl;
+						// std::cout << "workflow over here (XTA Hit ,is dram remapping to hbm)!!" << std::endl;
 						return total_latency;
 					}
 				}else{// 否则有可能是HBM,但也有可能是remap到DRAM   
@@ -1063,7 +1072,7 @@ MemoryController::hybrid2_access(MemReq& req)
 						// req.lineAddr = address;
 						req.lineAddr = tmpAddr;
 						total_latency += req.cycle;
-						std::cout << "workflow over here (XTA Hit ,is hbm)!!" << std::endl;
+						// std::cout << "workflow over here (XTA Hit ,is hbm)!!" << std::endl;
 						futex_unlock(&_lock);
 						return total_latency;
 					}else{
@@ -1075,7 +1084,7 @@ MemoryController::hybrid2_access(MemReq& req)
 						// req.lineAddr = address;
 						req.lineAddr = tmpAddr;
 						futex_unlock(&_lock);
-						std::cout << "workflow over here (XTA Hit ,is hbm remapping to dram)!!" << std::endl;
+						// std::cout << "workflow over here (XTA Hit ,is hbm remapping to dram)!!" << std::endl;
 						return total_latency;
 					}
 				}
@@ -1091,7 +1100,7 @@ MemoryController::hybrid2_access(MemReq& req)
 		// 根究 address 找到set 把set里的page 根据LRU值淘汰一个
 		// 这个set 已经由之前的引用类型获得
 		// 这里的address都有可能在remaptable里
-		std::cout << "workflow come here :(XTA Miss) !" << std::endl;
+		// std::cout << "workflow come here :(XTA Miss) !" << std::endl;
 		int empty_idx = check_set_full(SETEntries);
 		uint64_t lru_idx = ret_lru_page(SETEntries);
 
@@ -1233,7 +1242,7 @@ MemoryController::hybrid2_access(MemReq& req)
 
 			if(address > _mem_hbm_size)
 			{ //可能是dram，但也有可能是被remap的
-				std::cout << "workflow come here :(addr > memhbm_size)  !" << std::endl;
+				// std::cout << "workflow come here :(addr > memhbm_size)  !" << std::endl;
 				SETEntries[empty_idx]._dram_tag = get_page_id(address);
 				dest_blk_address = address;
 				is_dram = true;
@@ -1249,7 +1258,7 @@ MemoryController::hybrid2_access(MemReq& req)
 			}
 			else // 否则有可能是HBM，有可能remap到dram
 			{
-				std::cout << "workflow come here :(addr < memhbm_size)!" << std::endl;
+				// std::cout << "workflow come here :(addr < memhbm_size)!" << std::endl;
 				assert(address > 0);
 				SETEntries[empty_idx]._hbm_tag = get_page_id(address);
 				dest_blk_address = address;
@@ -1283,7 +1292,7 @@ MemoryController::hybrid2_access(MemReq& req)
 				SETEntries[empty_idx].bit_vector[static_cast<uint32_t>(blk_offset)] = 1;
 				futex_unlock(&_lock);
 				// req.lineAddr = tmpAddr;
-				std::cout << "workflow over here (!is_dram)!!" << std::endl;
+				// std::cout << "workflow over here (!is_dram)!!" << std::endl;
 				return total_latency;
 
 			}
@@ -1310,7 +1319,7 @@ MemoryController::hybrid2_access(MemReq& req)
 				}
 				futex_unlock(&_lock);
 				// req.lineAddr = tmpAddr;
-				std::cout << "workflow over here (is_dram)!!" << std::endl;
+				// std::cout << "workflow over here (is_dram)!!" << std::endl;
 				return total_latency;
 			}
 
@@ -1321,6 +1330,10 @@ MemoryController::hybrid2_access(MemReq& req)
 	return 0;
 }
 
+
+/**
+ * Only for test !
+ */
 uint64_t
 MemoryController::random_hybrid2_access(MemReq req)
 {
@@ -1355,7 +1368,7 @@ MemoryController::random_hybrid2_access(MemReq req)
 	// Address cache_hbm_address = (address / 64 /_cache_hbm_per_mc * 64) | (address % 64); 
 	assert(0 != _cache_hbm_per_mc);
 	uint32_t mem_hbm_select = (address / 64) % _cache_hbm_per_mc;
-	assert(4 > mem_hbm_select);
+	// assert(4 > mem_hbm_select);
 	Address mem_hbm_address = (address / 64 /_cache_hbm_per_mc * 64) | (address % 64); 
 
 	 // 创建一个随机数生成器
@@ -1391,7 +1404,9 @@ MemoryController::random_hybrid2_access(MemReq req)
 
 }
 
-
+/**
+ * Only for test !
+ */
 uint64_t
 MemoryController::hbm_hybrid2_access(MemReq req)
 {
@@ -1422,7 +1437,6 @@ MemoryController::hbm_hybrid2_access(MemReq req)
 	req.cycle = _mcdram[mcdram_select]->access(req, 0, 4);
  	// req.cycle = _memhbm[mcdram_select]->access(req, 0, 4);
 	req.lineAddr = address;
-	std::cout << "Easy Come Easy Go !" << std::endl;
 	return req.cycle;
 }
 

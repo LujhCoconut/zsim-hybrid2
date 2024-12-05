@@ -33,6 +33,7 @@
 #include "event_recorder.h"
 #include "timing_event.h"
 #include "zsim.h"
+// #include<iostream>
 
 //#define DEBUG(args...) info(args)
 #define DEBUG(args...)
@@ -523,6 +524,7 @@ uint64_t DDRMemory::findMinCmdCycle(const Request& r) const {
     return minCmdCycle;
 }
 
+// 根据内存的读写队列情况 决定响应读还是写
 uint64_t DDRMemory::trySchedule(uint64_t curCycle, uint64_t sysCycle) {
     /* Implement FR-FCFS scheduling to maximize bus utilization
      *
@@ -578,7 +580,7 @@ uint64_t DDRMemory::trySchedule(uint64_t curCycle, uint64_t sysCycle) {
     }
 
     DEBUG("%ld : Found ready request 0x%lx %s %ld (%ld / %ld)", curCycle, r->addr, r->write? "W" : "R", r->arrivalCycle, rdQueue.size(), wrQueue.size());
-
+    // std::cout << curCycle << " Found ready request 0x" <<  r->addr << "   r->arrCycle= " << r->arrivalCycle << std::endl;
     Bank& bank = banks[r->loc.rank][r->loc.bank];
 
     // Compute the minimum cycle at which the read or write command can be issued,
@@ -681,7 +683,7 @@ uint64_t DDRMemory::trySchedule(uint64_t curCycle, uint64_t sysCycle) {
     queue.remove(ir);
     (isWriteQueue? bank.wrReqs : bank.rdReqs).pop_front();
 
-    return (rdQueue.empty() && wrQueue.empty())? -1ul : minRespCycle - tCL;
+    return (rdQueue.empty() && wrQueue.empty())? -1ul : minRespCycle - tCL; // tCL + tCL + 1 - tCL = tBL + 1
 }
 
 void DDRMemory::refresh(uint64_t sysCycle) {
@@ -718,7 +720,53 @@ void DDRMemory::initTech(const char* techName, double time_scale) {
     // tBL's below are for 64-byte lines; we adjust as needed
 
     // Please keep this orderly; go from faster to slower technologies
-    if (tech == "DDR3-1333-CL10") {
+    if(tech == "HBM-1000-CL7"){
+        tCK = 2;
+        // tBL = BL  * tCK
+        tBL = 8;
+        tCL = uint32_t(7 / time_scale);
+        tRCD = uint32_t( 7 / time_scale);
+        tRTP = uint32_t( 3 / time_scale);
+        tRP = uint32_t( 7 / time_scale);
+        tRRD = uint32_t( 3 / time_scale); // 4/8
+        tRAS = uint32_t( 17 / time_scale);
+        tFAW = uint32_t( 15 / time_scale);
+        tWTR = uint32_t( 4 / time_scale);// 4/12
+        tWR = uint32_t( 8 / time_scale);
+        tRFC = uint32_t( 130 / time_scale);
+        tREFI = uint32_t(1950 / time_scale);
+    }else if(tech == "DDR4-3200-CL22"){
+        tCK = 0.63;
+        // tBL = ;
+        tBL = 4;
+        tCL = uint32_t(22 / time_scale);
+        tRCD = uint32_t( 22 / time_scale);
+        tRTP = uint32_t( 12 / time_scale);
+        tRP = uint32_t( 22 / time_scale);
+        tRRD = uint32_t( 6 / time_scale); // 4/8
+        tRAS = uint32_t( 52 / time_scale);
+        tFAW = uint32_t( 34 / time_scale);
+        tWTR = uint32_t( 8 / time_scale);// 4/12
+        tWR = uint32_t( 24 / time_scale);
+        tRFC = uint32_t( 560 / time_scale);
+        tREFI = uint32_t(12480 / time_scale);
+    }
+    else if(tech == "DDR4-3200-CL22-2"){
+        tCK = 0.63*2;
+        tBL = 4;
+        tCL = uint32_t(22 / time_scale);
+        tRCD = uint32_t( 22 / time_scale);
+        tRTP = uint32_t( 12 / time_scale);
+        tRP = uint32_t( 22 / time_scale);
+        tRRD = uint32_t( 6 / time_scale); // 4/8
+        tRAS = uint32_t( 52 / time_scale);
+        tFAW = uint32_t( 34 / time_scale);
+        tWTR = uint32_t( 8 / time_scale);// 4/12
+        tWR = uint32_t( 24 / time_scale);
+        tRFC = uint32_t( 560 / time_scale);
+        tREFI = uint32_t(12480 / time_scale);
+    }
+    else if (tech == "DDR3-1333-CL10") {
         // from DRAMSim2/ini/DDR3_micron_16M_8B_x4_sg15.ini (Micron)
         tCK = 1.5 / 2;  // ns; all other in mem cycles
         tBL = 4;

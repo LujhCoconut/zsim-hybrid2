@@ -230,7 +230,7 @@ MemoryController::MemoryController(g_string& name, uint32_t frequency, uint32_t 
 
 
 		// 推荐不在config里修改，在这里修改即可
-		phy_mem_size = config.get<uint64_t>("sys.mem.totalSize",8)*1024*1024*1024;
+		phy_mem_size = config.get<uint64_t>("sys.mem.totalSize",9)*1024*1024*1024;
 		
 		num_pages = phy_mem_size / _hybrid2_page_size;
 		for(uint64_t vpgnum = 0; vpgnum <num_pages; ++vpgnum)
@@ -354,8 +354,6 @@ MemoryController::access(MemReq& req)
 	// TODO For UnisonCache
 	// should correctly model way accesses
 	/////////////////////////////
-	
-
 
 
 	ReqType type = (req.type == GETS || req.type == GETX)? LOAD : STORE;
@@ -933,6 +931,8 @@ MemoryController::hybrid2_access(MemReq& req)
 	ReqType type = (req.type == GETS || req.type == GETX)? LOAD : STORE;
 	// 表示的地址
 	Address address = req.lineAddr;
+	// 地址按照64B Cacheline 对齐
+	address = address / 64 * 64;
 	// HBM在这里需要自己考虑分到哪一个通道，但是ZSim不太涉及请求排队
 
 	// uint32_t cache_hbm_select = (address / 64) % _cache_hbm_per_mc;
@@ -1152,7 +1152,7 @@ MemoryController::hybrid2_access(MemReq& req)
 					// 一直就在DRAM就加个映射
 					// 依然是基于ZSim只需要返回延迟的假设,如果有对应的hbm_tag，不管DRAMTable有没有是不是，都改成新的映射
 					if(tmp_hbm_tag != static_cast<uint64_t>(0)){
-						DRAMTable[address] = tmp_hbm_tag * _hybrid2_page_size + blk_offset;
+						DRAMTable[address] = tmp_hbm_tag * _hybrid2_page_size + blk_offset*64;
 					}else{ // 否则按照地址均匀的方式，按地址%mem_hbm_size 映射
 						DRAMTable[address] = address % _mem_hbm_size;
 					}
@@ -1189,7 +1189,7 @@ MemoryController::hybrid2_access(MemReq& req)
 				{
 					// 映射到DRAM,不管有没有是不是，都更新成新映射；
 					if(tmp_dram_tag != static_cast<uint64_t>(0)){
-						HBMTable[address] = tmp_dram_tag * _hybrid2_page_size + blk_offset;
+						HBMTable[address] = tmp_dram_tag * _hybrid2_page_size + blk_offset*64;
 					}else{ // 否则按照地址，简单生成一个
 						HBMTable[address] = address + (address % 7 + 1) * _mem_hbm_size;
 					}

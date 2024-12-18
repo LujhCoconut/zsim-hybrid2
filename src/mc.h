@@ -166,7 +166,7 @@ public:
 		// uint64_t* bit_vector;
 		// uint64_t* dirty_vector;
 
-		// 测试一下写死会不会规避一些问题,似乎能规避一些问题，但是还是原来的问题
+		// 测试一下写死会不会规避一些问题,似乎能规避一些问题，但是还是原来的问题    修改在这里为4kB/粒度
 		uint64_t bit_vector[64];
 		uint64_t dirty_vector[64];
 

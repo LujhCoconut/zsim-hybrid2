@@ -30,6 +30,8 @@ enum Scheme
    Tagless,
    Hybrid2,
    Chameleon,
+   Bumblebee,
+   CacheMode
 };
 
 class Way
@@ -230,195 +232,196 @@ public:
 	
 
 
-	// ----------------------------------------------------------
-	// Chameleon[MICRO'18] Reproduce
-	// some parameters using the same parameters in hybrid2'
-	uint32_t _chameleon_blk_size;
-	// SRRT: Segment Restricted Remapping Tables => track the hardware remapped segments
-	// Here, assume the lower address range is HBM : Segment0 <=> HBM ; Others <=> DDR
-	struct segGrpEntry
-	{
-		// in gem5 , addr is defined, but it seems taht no need to do so.
-		int ddrNum; // segDDRNum = DDRSize / HBMSize ; Default:8
-		bool cacheMode; // false:POM True:Cache
-		bool dirty;
-		// Alloc Bit Vector -> is busy or not ; 
-		g_vector<bool> ABV; 
-		// hotness
-		uint64_t _chameleon_counter;
+	// // ----------------------------------------------------------
+	// // Chameleon[MICRO'18] Reproduce
+	// // some parameters using the same parameters in hybrid2'
+	// uint32_t _chameleon_blk_size;
+	// // SRRT: Segment Restricted Remapping Tables => track the hardware remapped segments
+	// // Here, assume the lower address range is HBM : Segment0 <=> HBM ; Others <=> DDR
+	// struct segGrpEntry
+	// {
+	// 	// in gem5 , addr is defined, but it seems taht no need to do so.
+	// 	int ddrNum; // segDDRNum = DDRSize / HBMSize ; Default:8
+	// 	bool cacheMode; // false:POM True:Cache
+	// 	bool dirty;
+	// 	// Alloc Bit Vector -> is busy or not ; 
+	// 	g_vector<bool> ABV; 
+	// 	// hotness
+	// 	uint64_t _chameleon_counter;
 		
-		// Similar to hash map, array index is the key which indicates current segment, 
-		// the value is the v which indicates remapping segment
-		// Notes again, the lower address range is HBM. 
-		// Thus, an example : remapVector[0] = 1 indicates the HBM stores ddr seg[1].
-		// Once access seg[1], redirect to seg[0]
-		// remapVector[1] = 1 is primary state which indicates no remapping
-		g_vector<int> remapVector;
+	// 	// Similar to hash map, array index is the key which indicates current segment, 
+	// 	// the value is the v which indicates remapping segment
+	// 	// Notes again, the lower address range is HBM. 
+	// 	// Thus, an example : remapVector[0] = 1 indicates the HBM stores ddr seg[1].
+	// 	// Once access seg[1], redirect to seg[0]
+	// 	// remapVector[1] = 1 is primary state which indicates no remapping
+	// 	g_vector<int> remapVector;
 
-		// Similar to hash map, array index is the key which indicates current segment.
-		// This data struct is able to help dealing with read and writeback coherence.
-		// e.g. in cache mode, read ddr segment 1 ,data should be cached in hbm segment 0
-		//      > it seems that we can only use remapVector here for this instance ?
-		// e.g. when turnning to POM mode, the data in HBM cache should be writeback
-		//		> it also seems that we can only use remapVector here for this instance ?
-		g_vector<int> coherenceVector;
-		g_vector<MemReq> reqQueue;
+	// 	// Similar to hash map, array index is the key which indicates current segment.
+	// 	// This data struct is able to help dealing with read and writeback coherence.
+	// 	// e.g. in cache mode, read ddr segment 1 ,data should be cached in hbm segment 0
+	// 	//      > it seems that we can only use remapVector here for this instance ?
+	// 	// e.g. when turnning to POM mode, the data in HBM cache should be writeback
+	// 	//		> it also seems that we can only use remapVector here for this instance ?
+	// 	g_vector<int> coherenceVector;
+	// 	g_vector<MemReq> reqQueue;
 
-		segGrpEntry(int _ddrNum=8, bool _cacheMode=true, bool _dirty=false):
-			ddrNum(_ddrNum),cacheMode(_cacheMode),dirty(_dirty)
-		{
-			for(int i = 0; i< ddrNum+1; i++)
-			{
-				ABV.push_back(0);
-				remapVector.push_back(i);
-				coherenceVector.push_back(-1);
-			}
-		}
+	// 	segGrpEntry(int _ddrNum=8, bool _cacheMode=true, bool _dirty=false):
+	// 		ddrNum(_ddrNum),cacheMode(_cacheMode),dirty(_dirty)
+	// 	{
+	// 		for(int i = 0; i< ddrNum+1; i++)
+	// 		{
+	// 			ABV.push_back(0);
+	// 			remapVector.push_back(i);
+	// 			coherenceVector.push_back(-1);
+	// 		}
+	// 	}
 
-		bool isCache()
-		{
-			return cacheMode;
-		}
+	// 	bool isCache()
+	// 	{
+	// 		return cacheMode;
+	// 	}
 
-		void setCacheMode(bool value)
-		{
-			cacheMode = value;
-			return;
-		}
+	// 	void setCacheMode(bool value)
+	// 	{
+	// 		cacheMode = value;
+	// 		return;
+	// 	}
 
-		bool isDirty()
-		{
-			return dirty;
-		}
+	// 	bool isDirty()
+	// 	{
+	// 		return dirty;
+	// 	}
 
-		void setDirty(bool value)
-		{
-			dirty=value;
-			return;
-		}
+	// 	void setDirty(bool value)
+	// 	{
+	// 		dirty=value;
+	// 		return;
+	// 	}
 
-		bool isSegmentBusy(int segment)
-		{
-			if(ABV[segment]==0) return false;
-			else return true;
-		}
+	// 	bool isSegmentBusy(int segment)
+	// 	{
+	// 		if(ABV[segment]==0) return false;
+	// 		else return true;
+	// 	}
 
-		bool setSegmentBusy(int segment,bool value)
-		{
-			ABV[segment]=value;
-			return;
-		}
+	// 	// bool setSegmentBusy(int segment,bool value)
+	// 	// {
+	// 	// 	ABV[segment]=value;
+	// 	// 	//
+	// 	// 	return true;
+	// 	// }
 
-	};
+	// };
 
-	g_vector<segGrpEntry> segGrps;
-	uint64_t get_segment(Address addr);
-	int get_segment_num(Address addr); // hbm 0; ddr 1 - n;
+	// g_vector<segGrpEntry> segGrps;
+	// uint64_t get_segment(Address addr);
+	// int get_segment_num(Address addr); // hbm 0; ddr 1 - n;
 	
 
-	// ----------------------------------------------------------
-	// Bumblebee[DAC'23] Reproduce
-	const static int bumblebee_m = 80; // 取消const static时 请将下面结构体的构造函数取消，并在cpp中初始化
-	const static int bumblebee_n = 10; // paper n
-	int bumblebee_T; // paper T
-	uint32_t _bumblebee_page_size;
-	uint32_t _bumblebee_blk_size;
+	// // ----------------------------------------------------------
+	// // Bumblebee[DAC'23] Reproduce
+	// const static int bumblebee_m = 80; // 取消const static时 请将下面结构体的构造函数取消，并在cpp中初始化
+	// const static int bumblebee_n = 10; // paper n
+	// int bumblebee_T; // paper T
+	// uint32_t _bumblebee_page_size;
+	// uint32_t _bumblebee_blk_size;
 
-	const static int blk_per_page = 64;
+	// const static int blk_per_page = 64;
 
-	struct PLEEntry{
-		g_vector<int> PLE; // -1 : 未分配
-		g_vector<int> Occupy; // 0:Not use ; 1:Use
-		g_vector<int> Type; // 0:DRAM 1:mHBM 2:cHBM (only 1 & 2 are used)
+	// struct PLEEntry{
+	// 	g_vector<int> PLE; // -1 : 未分配
+	// 	g_vector<int> Occupy; // 0:Not use ; 1:Use
+	// 	g_vector<int> Type; // 0:DRAM 1:mHBM 2:cHBM (only 1 & 2 are used)
 
-		// HBM is in the front of the set
-		// ple value can re multiple, cache should be considered first !!
-		PLEEntry()
-		{
-			for(int i = 0;i < (bumblebee_m + bumblebee_n);i++)
-			{
-				PLE.push_back(-1);
-				Occupy.push_back(0);
-				if(i < bumblebee_n)
-				{
-					Type.push_back(1);
-				}else{
-					Type.push_back(0);
-				}
-			}
-		}
-	};
+	// 	// HBM is in the front of the set
+	// 	// ple value can re multiple, cache should be considered first !!
+	// 	PLEEntry()
+	// 	{
+	// 		for(int i = 0;i < (bumblebee_m + bumblebee_n);i++)
+	// 		{
+	// 			PLE.push_back(-1);
+	// 			Occupy.push_back(0);
+	// 			if(i < bumblebee_n)
+	// 			{
+	// 				Type.push_back(1);
+	// 			}else{
+	// 				Type.push_back(0);
+	// 			}
+	// 		}
+	// 	}
+	// };
 
-	// BLE 数组会追踪 cHBM 和 mHBM 页面中已被访问的块
-	// 如果页面中的大多数块已被预取到 cHBM，表明该页面具有强空间局部性，应该被切换为 mHBM 页面。
-	// 如果大多数 HBM 页面表现出强空间局部性，则应将更多的片外页面迁移到 mHBM。
-	struct BLEEntry{
-		int ple_idx; // 可以索引到PLEEntry page-offset
-		g_vector<int> validVector;
-		g_vector<int> dirtyVector;
+	// // BLE 数组会追踪 cHBM 和 mHBM 页面中已被访问的块
+	// // 如果页面中的大多数块已被预取到 cHBM，表明该页面具有强空间局部性，应该被切换为 mHBM 页面。
+	// // 如果大多数 HBM 页面表现出强空间局部性，则应将更多的片外页面迁移到 mHBM。
+	// struct BLEEntry{
+	// 	int ple_idx; // 可以索引到PLEEntry page-offset
+	// 	g_vector<int> validVector;
+	// 	g_vector<int> dirtyVector;
 
-		BLEEntry(int _ple_idx = -1):ple_idx(_ple_idx)
-		{
-			for(int i = 0 ;i < blk_per_page; i++)
-			{
-				validVector.push_back(0);
-				dirtyVector.push_back(0);
-			}
-		}
-	};
+	// 	BLEEntry(int _ple_idx = -1):ple_idx(_ple_idx)
+	// 	{
+	// 		for(int i = 0 ;i < blk_per_page; i++)
+	// 		{
+	// 			validVector.push_back(0);
+	// 			dirtyVector.push_back(0);
+	// 		}
+	// 	}
+	// };
            
-	struct MetaGrpEntry{
-		g_vector<BLEEntry> _bleEntries;
-		PLEEntry _pleEntry;
-		// ......
-	};
+	// struct MetaGrpEntry{
+	// 	g_vector<BLEEntry> _bleEntries;
+	// 	PLEEntry _pleEntry;
+	// 	// ......
+	// };
 
-	g_vector<MetaGrpEntry> MetaGrp;
-
-
-	struct QueuePage{
-		int _page_id; // idx or page_offset ?
-		uint64_t _counter;
-		uint64_t _last_mod_cycle;
-		QueuePage(uint64_t cntr = 0,int last_mod_cycle = 10):_counter(cntr),_last_mod_cycle(last_mod_cycle){};
-	};
+	// g_vector<MetaGrpEntry> MetaGrp;
 
 
-	// 具有高访问比例的 mHBM 页面反映了强空间局部性，
-	// 而具有低访问比例的 mHBM 页面以及剩余的 cHBM 页面反映了弱空间局部性。
-	// 重映射集中空间局部性程度 (SL) 的评估公式为：SL = Na − Nn − Nc
-	// SL>0（强空间局部性），应将更多的热点数据迁移到 mHBM，以更好地利用空间局部性并充分利用内存带宽
-	// SL≤0（弱空间局部性），应将热点数据缓存到 cHBM，以减少过度预取的情况。
-
-	int rh_upper = 80; //Rh较高的超参数
-	uint64_t long_time = 1000000; // 长时间的超参数
+	// struct QueuePage{
+	// 	int _page_id; // idx or page_offset ?
+	// 	uint64_t _counter;
+	// 	uint64_t _last_mod_cycle;
+	// 	QueuePage(uint64_t cntr = 0,int last_mod_cycle = 10):_counter(cntr),_last_mod_cycle(last_mod_cycle){};
+	// };
 
 
+	// // 具有高访问比例的 mHBM 页面反映了强空间局部性，
+	// // 而具有低访问比例的 mHBM 页面以及剩余的 cHBM 页面反映了弱空间局部性。
+	// // 重映射集中空间局部性程度 (SL) 的评估公式为：SL = Na − Nn − Nc
+	// // SL>0（强空间局部性），应将更多的热点数据迁移到 mHBM，以更好地利用空间局部性并充分利用内存带宽
+	// // SL≤0（弱空间局部性），应将热点数据缓存到 cHBM，以减少过度预取的情况。
 
-	// 时间局部性
-	// 如果rh较高，对于 SL>0 只有热度值大于 T 的页面被允许迁移到 mHBM
-	// 对于SL≤0 ，只有页面中热度值大于 T 的块被允许缓存到 cHBM
-	struct HotnenssTracker{
-		int _rh; // HBM Occupied Ratio
-		int _T; //阈值
-		int _nc; // number of cHBM Pages
-		int _na; // mHBM accessed
-		int _nn; // mHBM not accessed
-		// LRU Hot Table Queue
-		g_list<QueuePage> HBMQueue; 
-		g_list<QueuePage> DRAMQueue;
+	// int rh_upper = 80; //Rh较高的超参数
+	// uint64_t long_time = 1000000; // 长时间的超参数
 
-		HotnenssTracker(int rh = 0, int nc = 0, int na=0, int nn=0):
-			_rh(rh),_nc(nc),_na(na),_nn(nn)
-		{
 
-		}
-	};
 
-	// 一个set 一个HotnessTracker
-	g_vector<HotnenssTracker> HotnessTable;
+	// // 时间局部性
+	// // 如果rh较高，对于 SL>0 只有热度值大于 T 的页面被允许迁移到 mHBM
+	// // 对于SL≤0 ，只有页面中热度值大于 T 的块被允许缓存到 cHBM
+	// struct HotnenssTracker{
+	// 	int _rh; // HBM Occupied Ratio
+	// 	int _T; //阈值
+	// 	int _nc; // number of cHBM Pages
+	// 	int _na; // mHBM accessed
+	// 	int _nn; // mHBM not accessed
+	// 	// LRU Hot Table Queue
+	// 	g_list<QueuePage> HBMQueue; 
+	// 	g_list<QueuePage> DRAMQueue;
 
-	void tryEvict(PLEEntry& pleEntry,HotnenssTracker& hotTracker,uint64_t current_cycle);
+	// 	HotnenssTracker(int rh = 0, int nc = 0, int na=0, int nn=0):
+	// 		_rh(rh),_nc(nc),_na(na),_nn(nn)
+	// 	{
+
+	// 	}
+	// };
+
+	// // 一个set 一个HotnessTracker
+	// g_vector<HotnenssTracker> HotnessTable;
+
+	// void tryEvict(PLEEntry& pleEntry,HotnenssTracker& hotTracker,uint64_t current_cycle);
 
 
 	// ----------------------------------------------------------
@@ -466,6 +469,7 @@ private:
 	// Balance in- and off-package DRAM bandwidth. 
 	// From "BATMAN: Maximizing Bandwidth Utilization of Hybrid Memory Systems"
 	bool _bw_balance; 
+	// 小于ds_index的cache（HBM）则被标记为disable，未被使用
 	uint64_t _ds_index;
 
 	// TLB Hack
@@ -505,8 +509,8 @@ private:
 	uint32_t _llc_latency;
 public:
 	MemoryController(g_string& name, uint32_t frequency, uint32_t domain, Config& config);
-	uint64_t chameleon_access(MemReq& req);
-	uint64_t bumblebee_access(MemReq& req);
+	// uint64_t chameleon_access(MemReq& req);
+	// uint64_t bumblebee_access(MemReq& req);
 	uint64_t hybrid2_access(MemReq& req);
 	uint64_t access(MemReq& req);
 	const char * getName() { return _name.c_str(); };

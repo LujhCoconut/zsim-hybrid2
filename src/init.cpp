@@ -794,14 +794,18 @@ static void PostInitStats(bool perProcessDir, Config& config) {
     zinfo->rootStat->makeImmutable();
     zinfo->trigger = 15000;
 
-    string pathStr = zinfo->outputDir;
+    // string pathStr = zinfo->outputDir;
+    // pathStr += "/";
+
+    string pathStr = config.get<const char*>("sim.outputDir", zinfo->outputDir);
+    string testCase = config.get<const char*>("sim.testCase", "");
     pathStr += "/";
 
     // Absolute paths for stats files. Note these must be in the global heap.
-    const char* pStatsFile = gm_strdup((pathStr + "zsim.h5").c_str());
-    const char* evStatsFile = gm_strdup((pathStr + "zsim-ev.h5").c_str());
-    const char* cmpStatsFile = gm_strdup((pathStr + "zsim-cmp.h5").c_str());
-    const char* statsFile = gm_strdup((pathStr + "zsim.out").c_str());
+    const char* pStatsFile = gm_strdup((pathStr + testCase + "zsim.h5").c_str());
+    const char* evStatsFile = gm_strdup((pathStr + testCase + "zsim-ev.h5").c_str());
+    const char* cmpStatsFile = gm_strdup((pathStr + testCase + "zsim-cmp.h5").c_str());
+    const char* statsFile = gm_strdup((pathStr + testCase + "zsim.out").c_str());
 
     if (zinfo->statsPhaseInterval) {
         const char* periodicStatsFilter = config.get<const char*>("sim.periodicStatsFilter", "");

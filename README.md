@@ -4,15 +4,14 @@ This project aims to reproduce the **HPCA'2020** paper `"Hybrid2: Combining Cach
 
 The link to the open-source Banshee project is `https://github.com/yxymit/banshee`.
 
-## v1.0.0
-The first version of Zsim-Hybrid2 is released. The project is implemented based on the open-source Banshee project.
 
-## v1.0.1
+## v1.0.1 (Current Version)
 The second version of Zsim-Hybrid2 is released. The project is implemented based on the open-source Banshee project. The following changes are made:
 1. Modified the logic of two remap tables, using page ids as keys and values.
 2. The impact of traffic during the migration process is considered in this version, with `type == 2` requests used for load and store operations to represent migration and eviction.
 
 **IPC Test**
+
 In the experimental testing of version v1.0.1, we used DDR-2400 as NM, HBM-2000 as FM, and Sys Frequency = 3400. Using deepsjeng from SPEC CPU2017 as the dataset, the experimental performance of hybrid-v1.0.1 was observed to be between that of pure DRAM and pure HBM.
 
 ```python
@@ -47,3 +46,35 @@ In the experimental testing of version v1.0.1, we used DDR-2400 as NM, HBM-2000 
     }
 ```
 In this experiment, the performance of the Hybrid2-v1.0.1 version improved by 13.38% compared to the pure DRAM baseline. However, it showed a 44.48% performance decrease compared to the pure HBM baseline. This indicates that there is room for optimization in the v1.0.1 code.
+
+## v1.0.0
+The first version of Zsim-Hybrid2 is released. The project is implemented based on the open-source Banshee project.
+
+## How to build Zsim-Hybrid2
+External dependencies: gcc >=4.6, pin, scons, libconfig, libhdf5, libelfg0
+
+1. Clone the repository
+```shell
+git clone https://github.com/LujhCoconut/zsim-hybrid2.git
+```
+
+2. Download Pin 2.14 
+[Pin 2.14](https://software.intel.com/sites/landingpage/pintool/downloads/pin-2.14-71313-gcc.4.4.7-linux.tar.gz). Tested with Pin 2.14 on an x86-64 architecture.
+
+3. libconfig
+[libconfig]( http://www.hyperrealm.com/libconfig). Tested with libconfig-1.7.3 on an x86-64 architecture.
+
+4. libhdf5
+[libhdf5](http://www.hdfgroup.org). v1.8.4 path 1 or higher.
+
+5. compile
+```shell
+scons -j<You Want>
+```
+
+6. run
+```shell
+build/opt/zsim tests/<condfig_you_want.cfg>
+```
+
+

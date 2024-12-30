@@ -1331,7 +1331,6 @@ MemoryController::hybrid2_access(MemReq &req)
 				{
 					// Type = store需要标记为脏 update 2024/12/30
 					SETEntries[i].dirty_vector[blk_offset] = 1; // if evict, should writeback !
-					// 这一步实际上涉及到了内存交织,在这里访问cacheHBM还是memHBM没有区别
 					req.lineAddr = mem_hbm_address;
 					// 第三个参数怎么设置，没想好，TODO
 					req.cycle = _mcdram[mem_hbm_select]->access(req, 0, 4);
@@ -1383,11 +1382,11 @@ MemoryController::hybrid2_access(MemReq &req)
 						req.lineAddr = tmpAddr;
 						total_latency += req.cycle;
 
-						// load from dram
-						MemReq load_req = {tmpAddr,GETS, req.childId, &state, req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
-						_ext_dram->access(load_req, 2, 4);
+						// load from dram (when we access a cacheline, we actually have executed load operation. Thus load_req is a meaningless additional latency)
+						// MemReq load_req = {tmpAddr,GETS, req.childId, &state, req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+						// _ext_dram->access(load_req, 2, 4);
 
-						// stroe to hbm
+						// store to hbm 
 						uint64_t tmp_hbm_tag = SETEntries[i]._hbm_tag;
 						Address dest_hbm_addr = 0;
 						if(tmp_hbm_tag != static_cast<uint64_t>(0))
@@ -1402,7 +1401,7 @@ MemoryController::hybrid2_access(MemReq &req)
 						uint64_t dest_hbm_mc_address = (dest_hbm_addr / 64 / _mem_hbm_per_mc * 64) | (dest_hbm_addr % 64);
 						uint64_t dest_hbm_select = (dest_hbm_addr / 64) % _mem_hbm_per_mc;
 						MemReq store_req = {dest_hbm_mc_address, PUTX, req.childId,&state,req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
-						_mcdram[dest_hbm_select]->access(store_req, 2, 4);
+						_mcdram[dest_hbm_select]->access(store_req, 2, 4); // notice : this is a cacheline, so data_size = 4 (*16) 
 
 						SETEntries[i].bit_vector[blk_offset] = 1;
 						// std::cout << "workflow over here (XTA Hit ,is dram)!!" << std::endl;
@@ -1454,9 +1453,9 @@ MemoryController::hybrid2_access(MemReq &req)
 						// req.lineAddr = address;
 						req.lineAddr = tmpAddr;
 
-						// load from dram
-						MemReq load_req = {dest_address,GETS, req.childId, &state, req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
-						_ext_dram->access(load_req, 2, 4);
+						// load from dram (when we access a cacheline, we actually have executed load operation. Thus load_req is a meaningless additional latency)
+						// MemReq load_req = {dest_address,GETS, req.childId, &state, req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+						// _ext_dram->access(load_req, 2, 4);
 
 						// store to hbm
 						uint64_t tmp_hbm_tag = SETEntries[i]._hbm_tag;
@@ -1604,10 +1603,9 @@ MemoryController::hybrid2_access(MemReq &req)
 								MemReq load_req = {dest_hbm_mc_address, GETS, req.childId, &state, req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
 								_mcdram[dest_hbm_select]->access(load_req, 2, 4);
 								// store to dram
-								uint64_t dest_dram_mc_address = tmpAddr / 64 / _mem_hbm_per_mc * 64 | (tmpAddr % 64);
-								uint64_t dest_dram_select = (tmpAddr / 64) % _mem_hbm_per_mc;
-								MemReq store_req = {dest_dram_mc_address, PUTX, req.childId,&state,req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
-								_mcdram[dest_dram_select]->access(store_req, 2, 4);
+								uint64_t dest_dram_address = tmpAddr;
+								MemReq store_req = {dest_dram_address, PUTX, req.childId,&state,req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+								_ext_dram->access(store_req, 2, 4);
 							}
 							// update XTA
 							// SETEntries[lru_idx].bit_vector[i] = 0;
@@ -1648,10 +1646,9 @@ MemoryController::hybrid2_access(MemReq &req)
 								MemReq load_req = {tmpAddr,GETS, req.childId, &state, req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
 								_mcdram[mem_hbm_select]->access(load_req, 2, 4);
 								// store to dram
-								uint64_t dest_dram_mc_address = (tmp_dram_tag * _hybrid2_page_size + i * 64) / 64 / _mem_hbm_per_mc * 64 | (tmp_dram_tag * _hybrid2_page_size + i * 64) % 64;
-								uint64_t dest_dram_select = (tmp_dram_tag * _hybrid2_page_size + i * 64) / 64 % _mem_hbm_per_mc;
-								MemReq store_req = {dest_dram_mc_address, PUTX, req.childId,&state,req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
-								_mcdram[dest_dram_select]->access(store_req, 2, 4);
+								uint64_t dest_dram_address = tmp_dram_tag * _hybrid2_page_size + i * 64 ;
+								MemReq store_req = {dest_dram_address, PUTX, req.childId,&state,req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+								_ext_dram->access(store_req, 2, 4);
 							}
 							// update XTA
 							// SETEntries[lru_idx].bit_vector[i] = 0;
@@ -1669,10 +1666,9 @@ MemoryController::hybrid2_access(MemReq &req)
 								MemReq load_req = {tmpAddr,GETS, req.childId, &state, req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
 								_mcdram[mem_hbm_select]->access(load_req, 2, 4);
 								// store to dram
-								uint64_t dest_dram_mc_address = (dest_addr * _hybrid2_page_size + i * 64) / 64 / _mem_hbm_per_mc * 64 | (dest_addr * _hybrid2_page_size + i * 64) % 64;
-								uint64_t dest_dram_select = (dest_addr * _hybrid2_page_size + i * 64) / 64 % _mem_hbm_per_mc;
-								MemReq store_req = {dest_dram_mc_address, PUTX, req.childId,&state,req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
-								_mcdram[dest_dram_select]->access(store_req, 2, 4);
+								uint64_t dest_dram_address = dest_addr * _hybrid2_page_size + i * 64;
+								MemReq store_req = {dest_dram_address, PUTX, req.childId,&state,req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+								_ext_dram->access(store_req, 2, 4);
 							}
 							// update XTA
 							// SETEntries[lru_idx].bit_vector[i] = 0;

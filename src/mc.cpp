@@ -46,7 +46,7 @@ MemoryController::MemoryController(g_string &name, uint32_t frequency, uint32_t 
 	double timing_scale = config.get<double>("sys.mem.dram_timing_scale", 1);
 	g_string scheme = config.get<const char *>("sys.mem.cache_scheme", "NoCache");
 	_ext_type = config.get<const char *>("sys.mem.ext_dram.type", "Simple");
-	if (scheme != "NoCache" && scheme != "Hybrid2")
+	if (scheme != "NoCache" && scheme != "Hybrid2" && scheme != "Bumblebee")
 	{
 		_granularity = config.get<uint32_t>("sys.mem.mcdram.cache_granularity");
 		_num_ways = config.get<uint32_t>("sys.mem.mcdram.num_ways");
@@ -62,8 +62,8 @@ MemoryController::MemoryController(g_string &name, uint32_t frequency, uint32_t 
 	else if (scheme == "CacheMode")
 	{
 		_scheme = CacheMode;
-		assert(_granularity == 64);
-		assert(_num_ways == 1);
+		// assert(_granularity == 64);
+		// assert(_num_ways == 1);
 	}
 	
 	else if (scheme == "UnisonCache")
@@ -102,10 +102,10 @@ MemoryController::MemoryController(g_string &name, uint32_t frequency, uint32_t 
 	// {
 	// 	_scheme = Chameleon;
 	// }
-	// else if(scheme == "Bumblebee")
-	// {
-	// 	_scheme = Bumblebee;
-	// }
+	else if(scheme == "Bumblebee")
+	{
+		_scheme = Bumblebee;
+	}
 	else
 	{
 		printf("scheme=%s\n", scheme.c_str());
@@ -151,7 +151,7 @@ MemoryController::MemoryController(g_string &name, uint32_t frequency, uint32_t 
 	else
 		panic("Invalid memory controller type %s", _ext_type.c_str());
 
-	if (_scheme != NoCache && _scheme != Hybrid2)
+	if (_scheme != NoCache && _scheme != Hybrid2 && _scheme != Bumblebee)
 	{
 		// Configure the MC-Dram (Timing Model)
 		_mcdram_per_mc = config.get<uint32_t>("sys.mem.mcdram.mcdramPerMC", 4);
@@ -198,6 +198,7 @@ MemoryController::MemoryController(g_string &name, uint32_t frequency, uint32_t 
 				panic("Invalid memory controller type %s", _mcdram_type.c_str());
 		}
 		// Configure MC-Dram Functional Model
+		// 默认的ways为1
 		_num_sets = _cache_size / _num_ways / _granularity;
 		if (_scheme == Tagless)
 			assert(_num_sets == 1);
@@ -209,6 +210,7 @@ MemoryController::MemoryController(g_string &name, uint32_t frequency, uint32_t 
 			for (uint32_t j = 0; j < _num_ways; j++)
 				_cache[i].ways[j].valid = false;
 		}
+		// std::cout << "Allocating is allow!" << std::endl;
 		if (_scheme == AlloyCache || _scheme == CacheMode)
 		{
 			_line_placement_policy = (LinePlacementPolicy *)gm_malloc(sizeof(LinePlacementPolicy));
@@ -367,31 +369,38 @@ MemoryController::MemoryController(g_string &name, uint32_t frequency, uint32_t 
 
 	// }
 
-	// if(_scheme == Bumblebee){
-	// 	_mem_hbm_per_mc = config.get<uint32_t>("sys.mem.memhbm.memHBMPerMC", 4);
-	// 	_mem_hbm_size = config.get<uint32_t>("sys.mem.memhbm.size",1024)*1024*1024;// Default:1GB
-	// 	_mem_hbm_type = config.get<const char*>("sys.mem.memhbm.type","DDR");
-	// 	_mcdram_per_mc = config.get<uint32_t>("sys.mem.mcdram.mcdramPerMC", 4);
-	// 	_mcdram = (MemObject **) gm_malloc(sizeof(MemObject *) * _mcdram_per_mc);
-	// 	for (uint32_t i = 0; i < _mcdram_per_mc; i++)
-	// 	{
-	// 		g_string mcdram_name = _name + g_string("-mc-") + g_string(to_string(i).c_str());
-	// 		_mcdram[i] = BuildDDRMemory(config, frequency, domain, mcdram_name, "sys.mem.mcdram.", 1, timing_scale);
-	// 	}
-	// 	phy_mem_size = config.get<uint32_t>("sys.mem.totalSize",9)*1024*1024*1024;
-	// 	_chameleon_blk_size=config.get<uint64_t>("sys.mem.mcdram.blksize",64);
+	if(_scheme == Bumblebee){
+		// std::cout << "Start Initialization!\n" << std::endl;
+		_mem_hbm_per_mc = config.get<uint32_t>("sys.mem.memhbm.memHBMPerMC", 4);
+		_mem_hbm_size = config.get<uint32_t>("sys.mem.memhbm.size",1024)*1024*1024;// Default:1GB
+		_mem_hbm_type = config.get<const char*>("sys.mem.memhbm.type","DDR");
+		_mcdram_per_mc = config.get<uint32_t>("sys.mem.mcdram.mcdramPerMC", 4);
+		_mcdram = (MemObject **) gm_malloc(sizeof(MemObject *) * _mcdram_per_mc);
+		for (uint32_t i = 0; i < _mcdram_per_mc; i++)
+		{
+			g_string mcdram_name = _name + g_string("-mc-") + g_string(to_string(i).c_str());
+			_mcdram[i] = BuildDDRMemory(config, frequency, domain, mcdram_name, "sys.mem.mcdram.", 1, timing_scale);
+		}
+		phy_mem_size = config.get<uint32_t>("sys.mem.totalSize",9)*1024*1024*1024;
+		_bumblebee_blk_size = config.get<uint32_t>("sys.mem.bumblebee.blksize", 64);
+		_bumblebee_page_size =  config.get<uint32_t>("sys.mem.bumblebee.pagesize", 4)*1024;
 
-	// 	int ddrRatio = (int)(phy_mem_size - _mem_hbm_size) / _mem_hbm_size;
-	// 	// 要多少segment
-	// 	// 估算元数据开销：segGrpEntry一个接近4B 1GB/64B*4B = 64MB
-	// 	uint32_t _segment_number =	_mem_hbm_size / _chameleon_blk_size;
-	// 	// 初始化
-	// 	for(uint32_t i = 0; i<_segment_number ; i++)
-	// 	{
-	// 		segGrpEntry tmpEntry(ddrRatio);
-	// 		segGrps.push_back(tmpEntry);
-	// 	}
-	// }
+
+		uint32_t set_nums = _mem_hbm_size / bumblebee_n / _bumblebee_page_size;
+		for(uint32_t i = 0 ; i < set_nums;i++)
+		{
+			MetaGrpEntry tmpEntry;
+			MetaGrp.push_back(tmpEntry);
+			HotnenssTracker hotTracker;
+			HotnessTable.push_back(hotTracker);
+		}
+
+		num_pages = phy_mem_size / _bumblebee_page_size;
+		for (uint64_t vpgnum = 0; vpgnum < num_pages; ++vpgnum)
+		{
+			fixedMapping[vpgnum] = vpgnum % num_pages;
+		}
+	}
 	// Stats
 	_num_hit_per_step = 0;
 	_num_miss_per_step = 0;
@@ -400,6 +409,7 @@ MemoryController::MemoryController(g_string &name, uint32_t frequency, uint32_t 
 	for (uint32_t i = 0; i < MAX_STEPS; i++)
 		_miss_rate_trace[i] = 0;
 	_num_requests = 0;
+	// std::cout << "Init is done!\n" << std::endl;
 }
 
 uint64_t
@@ -448,6 +458,7 @@ MemoryController::access(MemReq &req)
 	}
 
 	_num_requests++;
+	
 	if (_scheme == NoCache)
 	{
 		///////   load from external dram
@@ -468,6 +479,12 @@ MemoryController::access(MemReq &req)
 		return req.cycle;
 	}
 
+	if (_scheme == Bumblebee)
+	{
+		std::cout << "\n\nGet into Function [bumblebee] " << std::endl;
+		req.cycle = bumblebee_access(req);
+		return req.cycle;
+	}
 	// if(_scheme==Chameleon)
 	// {
 	// 	// 请勿在同一个调用链里调用处理req的请求两次！
@@ -495,7 +512,7 @@ MemoryController::access(MemReq &req)
 	// uint64_t orig_cycle = req.cycle;
 	uint64_t data_ready_cycle = req.cycle;
 	MESIState state;
-
+	
 	if (_scheme == CacheOnly)
 	{
 		///////   load from mcdram
@@ -505,9 +522,14 @@ MemoryController::access(MemReq &req)
 		req.lineAddr = address;
 		_numLoadHit.inc();
 		futex_unlock(&_lock);
+		// std::cout << "CacheOnly is working"<<std::endl;
 		return req.cycle;
+		
 		////////////////////////////////////
 	}
+	// cacheonly模式下，HBM大于2GB时需要以下命令清除缓冲区，否则会报错
+	// std::cout << std::endl;
+	// ????
 	uint64_t step_length = _cache_size / 64 / 10;
 
 	// whether needs to probe tag for HybridCache.
@@ -1110,13 +1132,15 @@ MemoryController::access(MemReq &req)
 		uint64_t num_replace = _os_placement_policy->remapPages();
 		_numPlacement.inc(num_replace * 2);
 	}
-
+	
 	if (_num_requests % step_length == 0)
 	{
+		// std::cout << "step_length is not fail" << std::endl;
 		_num_hit_per_step /= 2;
 		_num_miss_per_step /= 2;
 		_mc_bw_per_step /= 2;
 		_ext_bw_per_step /= 2;
+		//默认不开启
 		if (_bw_balance && _mc_bw_per_step + _ext_bw_per_step > 0)
 		{
 			// adjust _ds_index	based on mc vs. ext dram bandwidth.
@@ -1234,7 +1258,7 @@ MemoryController::hybrid2_access(MemReq &req)
 	// 地址按照64B Cacheline 对齐
 	address = address / 64 * 64;
 	// HBM在这里需要自己考虑分到哪一个通道，但是ZSim不太涉及请求排队
-
+	MESIState state;
 	// uint32_t cache_hbm_select = (address / 64) % _cache_hbm_per_mc;
 	// Address cache_hbm_address = (address / 64 /_cache_hbm_per_mc * 64) | (address % 64);
 	assert(0 != _cache_hbm_per_mc);
@@ -1303,12 +1327,14 @@ MemoryController::hybrid2_access(MemReq &req)
 			{
 				// std::cout << "exist[" << exist << "]workflow come here :(Cacheline Hit)!" << std::endl;
 				// 访问HBM,TODO
-				if (type == STORE)
+				if (type == STORE) 
 				{
+					// Type = store需要标记为脏 update 2024/12/30
+					SETEntries[i].dirty_vector[blk_offset] = 1; // if evict, should writeback !
 					// 这一步实际上涉及到了内存交织,在这里访问cacheHBM还是memHBM没有区别
 					req.lineAddr = mem_hbm_address;
 					// 第三个参数怎么设置，没想好，TODO
-					req.cycle = _mcdram[mem_hbm_select]->access(req, 0, 6);
+					req.cycle = _mcdram[mem_hbm_select]->access(req, 0, 4);
 					// req.lineAddr = address;
 					req.lineAddr = tmpAddr;
 					total_latency += req.cycle;
@@ -1328,7 +1354,7 @@ MemoryController::hybrid2_access(MemReq &req)
 					return total_latency;
 				}
 			}
-			else
+			else // cacheline miss
 			{
 				// std::cout << "exist[" << exist << "]workflow come here :(Cacheline Miss)!" << std::endl;
 				// 这里也有两种情况。Case1:有可能在DRAM里；Case2：有可能在HBM里
@@ -1338,14 +1364,47 @@ MemoryController::hybrid2_access(MemReq &req)
 				if (address >= _mem_hbm_size)
 				{
 					// 检查DRAMTable有没有存映射
-					auto it = DRAMTable.find(address);
+					auto it = DRAMTable.find(page_addr);
 					if (it == DRAMTable.end())
 					{
 						// assert(it != DRAMTable.end());
-						// 访问DRAM,TODO
+						// 访问DRAM
+						// Two Paths:  update 2024/12/30
+						// case 1: load from dram , store to hbm, finally access hbm;
+						// critical path latency = load(dram) + store(hbm) + access(hbm);
+						// easy to keep coherence, but faces high latency penalty;
+						// case 2: access dram, load from dram, store to hbm;
+						// critical path latency = access(dram);
+
+						// choose [case 2] !
+
+						// access dram
 						req.cycle = _ext_dram->access(req, 0, 4);
 						req.lineAddr = tmpAddr;
 						total_latency += req.cycle;
+
+						// load from dram
+						MemReq load_req = {tmpAddr,GETS, req.childId, &state, req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+						_ext_dram->access(load_req, 2, 4);
+
+						// stroe to hbm
+						uint64_t tmp_hbm_tag = SETEntries[i]._hbm_tag;
+						Address dest_hbm_addr = 0;
+						if(tmp_hbm_tag != static_cast<uint64_t>(0))
+						{
+							dest_hbm_addr = tmp_hbm_tag * _hybrid2_page_size + blk_offset*64;
+						}
+						else
+						{
+							dest_hbm_addr = tmpAddr % _mem_hbm_size;
+						}
+
+						uint64_t dest_hbm_mc_address = (dest_hbm_addr / 64 / _mem_hbm_per_mc * 64) | (dest_hbm_addr % 64);
+						uint64_t dest_hbm_select = (dest_hbm_addr / 64) % _mem_hbm_per_mc;
+						MemReq store_req = {dest_hbm_mc_address, PUTX, req.childId,&state,req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+						_mcdram[dest_hbm_select]->access(store_req, 2, 4);
+
+						SETEntries[i].bit_vector[blk_offset] = 1;
 						// std::cout << "workflow over here (XTA Hit ,is dram)!!" << std::endl;
 						futex_unlock(&_lock);
 						return total_latency;
@@ -1354,7 +1413,6 @@ MemoryController::hybrid2_access(MemReq &req)
 					{
 						// 访问HBM,TODO
 						uint64_t dest_address = it->second;
-
 						uint64_t dest_hbm_mc_address = (dest_address / 64 / _mem_hbm_per_mc * 64) | (dest_address % 64);
 						uint64_t dest_hbm_select = (dest_address / 64) % _mem_hbm_per_mc;
 						req.lineAddr = dest_hbm_mc_address;
@@ -1362,6 +1420,7 @@ MemoryController::hybrid2_access(MemReq &req)
 						// req.lineAddr = address;
 						req.lineAddr = tmpAddr;
 						total_latency += req.cycle;
+						SETEntries[i].bit_vector[blk_offset] = 1;
 						futex_unlock(&_lock);
 						// std::cout << "workflow over here (XTA Hit ,is dram remapping to hbm)!!" << std::endl;
 						return total_latency;
@@ -1369,7 +1428,7 @@ MemoryController::hybrid2_access(MemReq &req)
 				}
 				else
 				{ // 否则有可能是HBM,但也有可能是remap到DRAM
-					auto it = HBMTable.find(address);
+					auto it = HBMTable.find(page_addr);
 					if (it == HBMTable.end())
 					{
 						// 访问HBM，TODO
@@ -1378,12 +1437,15 @@ MemoryController::hybrid2_access(MemReq &req)
 						// req.lineAddr = address;
 						req.lineAddr = tmpAddr;
 						total_latency += req.cycle;
+						SETEntries[i].bit_vector[blk_offset] = 1;
 						// std::cout << "workflow over here (XTA Hit ,is hbm)!!" << std::endl;
 						futex_unlock(&_lock);
 						return total_latency;
 					}
 					else
 					{
+						// under what circumstances can it happen?
+						// a cacheline that was evicted to dram ?
 						uint64_t dest_address = it->second;
 						// 访问DRAM,TODO
 						req.lineAddr = dest_address;
@@ -1391,6 +1453,29 @@ MemoryController::hybrid2_access(MemReq &req)
 						total_latency += req.cycle;
 						// req.lineAddr = address;
 						req.lineAddr = tmpAddr;
+
+						// load from dram
+						MemReq load_req = {dest_address,GETS, req.childId, &state, req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+						_ext_dram->access(load_req, 2, 4);
+
+						// store to hbm
+						uint64_t tmp_hbm_tag = SETEntries[i]._hbm_tag;
+						Address dest_hbm_addr = 0;
+						if(tmp_hbm_tag != static_cast<uint64_t>(0))
+						{
+							dest_hbm_addr = tmp_hbm_tag * _hybrid2_page_size + blk_offset*64;
+						}
+						else
+						{
+							dest_hbm_addr = dest_address % _mem_hbm_size;
+						}
+
+						uint64_t dest_hbm_mc_address = (dest_hbm_addr / 64 / _mem_hbm_per_mc * 64) | (dest_hbm_addr % 64);
+						uint64_t dest_hbm_select = (dest_hbm_addr / 64) % _mem_hbm_per_mc;
+						MemReq store_req = {dest_hbm_mc_address, PUTX, req.childId,&state,req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+						_mcdram[dest_hbm_select]->access(store_req, 2, 4);
+
+						SETEntries[i].bit_vector[blk_offset] = 1;
 						futex_unlock(&_lock);
 						// std::cout << "workflow over here (XTA Hit ,is hbm remapping to dram)!!" << std::endl;
 						return total_latency;
@@ -1447,11 +1532,13 @@ MemoryController::hybrid2_access(MemReq &req)
 			if (address >= _mem_hbm_size)
 			{
 				migrate_init_dram = true;
-				auto it = DRAMTable.find(address);
+				uint64_t hbm_page_addr = 0;
+				auto it = DRAMTable.find(page_addr);
 				if (it != DRAMTable.end())
 				{
 					migrate_init_dram = false;
 					migrate_final_hbm = true;
+					hbm_page_addr = it->second;
 				}
 
 				// 如果迁移代价不高且原来就在DRAM里，就迁移
@@ -1459,10 +1546,43 @@ MemoryController::hybrid2_access(MemReq &req)
 				{
 					// 一直就在DRAM就加个映射
 					// 依然是基于ZSim只需要返回延迟的假设,如果有对应的hbm_tag，不管DRAMTable有没有是不是，都改成新的映射
+					// load from hbm, stroe to dram
 					if(tmp_hbm_tag != static_cast<uint64_t>(0)){
-						DRAMTable[address] = tmp_hbm_tag * _hybrid2_page_size + blk_offset*64;
+						DRAMTable[page_addr] = tmp_hbm_tag;
+						for(uint32_t i = 0; i< (_hybrid2_page_size / _hybrid2_blk_size);i++)
+						{
+							if(SETEntries[lru_idx].bit_vector[i] == 0)
+							{
+								// load from dram
+								MemReq load_req = {tmpAddr,GETS, req.childId, &state, req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+								_mcdram[mem_hbm_select]->access(load_req, 2, 4);
+								// store to hbm
+								uint64_t dest_hbm_mc_address = (tmp_hbm_tag * _hybrid2_page_size + i * 64) / 64 / _mem_hbm_per_mc * 64 | (tmp_hbm_tag * _hybrid2_page_size + i * 64) % 64;
+								uint64_t dest_hbm_select = (tmp_hbm_tag * _hybrid2_page_size + i * 64) / 64 % _mem_hbm_per_mc;
+								MemReq store_req = {dest_hbm_mc_address, PUTX, req.childId,&state,req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+								_mcdram[dest_hbm_select]->access(store_req, 2, 4);
+								// update XTA; Meaningless, it will be set to 0 later, as XTA is only used for cache. But now this is used for memory. 
+								SETEntries[lru_idx].bit_vector[i] = 1;
+							}
+						}
 					}else{ // 否则按照地址均匀的方式，按地址%mem_hbm_size 映射
-						DRAMTable[address] = address % _mem_hbm_size;
+						DRAMTable[page_addr] = page_addr % (_mem_hbm_size / _hybrid2_page_size);
+						for(uint32_t i = 0; i< (_hybrid2_page_size / _hybrid2_blk_size);i++)
+						{
+							if(SETEntries[lru_idx].bit_vector[i] == 0)
+							{
+								// load from dram
+								MemReq load_req = {tmpAddr,GETS, req.childId, &state, req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+								_mcdram[mem_hbm_select]->access(load_req, 2, 4);
+								// store to hbm
+								uint64_t dest_hbm_mc_address = (page_addr % (_mem_hbm_size / _hybrid2_page_size) * _hybrid2_page_size + i * 64) / 64 / _mem_hbm_per_mc * 64 | (tmp_hbm_tag * _hybrid2_page_size + i * 64) % 64;
+								uint64_t dest_hbm_select = (page_addr % (_mem_hbm_size / _hybrid2_page_size) * _hybrid2_page_size + i * 64) / 64 % _mem_hbm_per_mc;
+								MemReq store_req = {dest_hbm_mc_address, PUTX, req.childId,&state,req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+								_mcdram[dest_hbm_select]->access(store_req, 2, 4);
+								// update XTA; Meaningless, it will be set to 0 later, as XTA is only used for cache. But now this is used for memory. 
+								SETEntries[lru_idx].bit_vector[i] = 1;
+							}
+						}
 					}
 				}
 
@@ -1472,8 +1592,30 @@ MemoryController::hybrid2_access(MemReq &req)
 					// 可能是被映射进HBM的
 					if (migrate_final_hbm)
 					{
+						// evict: load from hbm, store to dram
+						for(uint32_t i = 0;i<(_hybrid2_page_size / _hybrid2_blk_size);i++)
+						{
+							// only dirty cacheline should be writeback;
+							if(SETEntries[lru_idx].dirty_vector[i] == 1)
+							{
+								// load from hbm
+								uint64_t dest_hbm_mc_address = hbm_page_addr * _hybrid2_page_size + i * 64;
+								uint64_t dest_hbm_select = (hbm_page_addr * _hybrid2_page_size + i * 64) / 64 % _mem_hbm_per_mc;
+								MemReq load_req = {dest_hbm_mc_address, GETS, req.childId, &state, req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+								_mcdram[dest_hbm_select]->access(load_req, 2, 4);
+								// store to dram
+								uint64_t dest_dram_mc_address = tmpAddr / 64 / _mem_hbm_per_mc * 64 | (tmpAddr % 64);
+								uint64_t dest_dram_select = (tmpAddr / 64) % _mem_hbm_per_mc;
+								MemReq store_req = {dest_dram_mc_address, PUTX, req.childId,&state,req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+								_mcdram[dest_dram_select]->access(store_req, 2, 4);
+							}
+							// update XTA
+							// SETEntries[lru_idx].bit_vector[i] = 0;
+							// SETEntries[lru_idx].dirty_vector[i] = 0;
+						}
+						
 						// 解除映射
-						DRAMTable.erase(address);
+						DRAMTable.erase(page_addr);						
 					} // 否则什么也不用做
 				}
 			}
@@ -1484,7 +1626,7 @@ MemoryController::hybrid2_access(MemReq &req)
 			if (address < _mem_hbm_size)
 			{
 				migrate_init_hbm = true;
-				auto it = HBMTable.find(address);
+				auto it = HBMTable.find(page_addr);
 				if (it != HBMTable.end())
 				{
 					migrate_init_hbm = false;
@@ -1496,16 +1638,53 @@ MemoryController::hybrid2_access(MemReq &req)
 				{
 					// 映射到DRAM,不管有没有是不是，都更新成新映射；
 					if(tmp_dram_tag != static_cast<uint64_t>(0)){
-						HBMTable[address] = tmp_dram_tag * _hybrid2_page_size + blk_offset*64;
+						HBMTable[page_addr] = tmp_dram_tag;
+						
+						for(uint32_t i = 0;i<(_hybrid2_page_size/_hybrid2_blk_size);i++)
+						{
+							if(SETEntries[lru_idx].dirty_vector[i]==1)
+							{
+								// load from hbm
+								MemReq load_req = {tmpAddr,GETS, req.childId, &state, req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+								_mcdram[mem_hbm_select]->access(load_req, 2, 4);
+								// store to dram
+								uint64_t dest_dram_mc_address = (tmp_dram_tag * _hybrid2_page_size + i * 64) / 64 / _mem_hbm_per_mc * 64 | (tmp_dram_tag * _hybrid2_page_size + i * 64) % 64;
+								uint64_t dest_dram_select = (tmp_dram_tag * _hybrid2_page_size + i * 64) / 64 % _mem_hbm_per_mc;
+								MemReq store_req = {dest_dram_mc_address, PUTX, req.childId,&state,req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+								_mcdram[dest_dram_select]->access(store_req, 2, 4);
+							}
+							// update XTA
+							// SETEntries[lru_idx].bit_vector[i] = 0;
+							// SETEntries[lru_idx].dirty_vector[i] = 0;
+						}
+						
 					}else{ // 否则按照地址，简单生成一个
-						HBMTable[address] = address + (address % 7 + 1) * _mem_hbm_size;
+						uint64_t dest_addr = page_addr + (page_addr % 7 + 1) * (_mem_hbm_size / _hybrid2_page_size);
+						HBMTable[page_addr] = dest_addr;
+						for(uint32_t i = 0;i<(_hybrid2_page_size/_hybrid2_blk_size);i++)
+						{
+							if(SETEntries[lru_idx].dirty_vector[i]==1)
+							{
+								// load from hbm
+								MemReq load_req = {tmpAddr,GETS, req.childId, &state, req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+								_mcdram[mem_hbm_select]->access(load_req, 2, 4);
+								// store to dram
+								uint64_t dest_dram_mc_address = (dest_addr * _hybrid2_page_size + i * 64) / 64 / _mem_hbm_per_mc * 64 | (dest_addr * _hybrid2_page_size + i * 64) % 64;
+								uint64_t dest_dram_select = (dest_addr * _hybrid2_page_size + i * 64) / 64 % _mem_hbm_per_mc;
+								MemReq store_req = {dest_dram_mc_address, PUTX, req.childId,&state,req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
+								_mcdram[dest_dram_select]->access(store_req, 2, 4);
+							}
+							// update XTA
+							// SETEntries[lru_idx].bit_vector[i] = 0;
+							// SETEntries[lru_idx].dirty_vector[i] = 0;
+						}
 					}
 				}
 
-				// 温热数据就留在HBM了
+				// 温热数据就留在HBM了,
 				if (migrate_final_dram && heat_counter >= avg_temp)
 				{
-					HBMTable.erase(address);
+					HBMTable.erase(page_addr);
 				}
 			}
 
@@ -1554,8 +1733,8 @@ MemoryController::hybrid2_access(MemReq &req)
 				auto it = DRAMTable.find(address);
 				if (it != DRAMTable.end()) // 就说明有对吧
 				{
-					SETEntries[empty_idx]._hbm_tag = get_page_id(it->second);
-					dest_blk_address = it->second;
+					SETEntries[empty_idx]._hbm_tag = it->second;
+					dest_blk_address = it->second*_hybrid2_page_size + blk_offset*64;;
 					is_dram = false;
 					is_remapped = true;
 				}
@@ -1569,8 +1748,8 @@ MemoryController::hybrid2_access(MemReq &req)
 				auto it = HBMTable.find(address);
 				if (it != HBMTable.end()) // 就说明有对吧
 				{
-					SETEntries[empty_idx]._dram_tag = get_page_id(it->second);
-					dest_blk_address = it->second;
+					SETEntries[empty_idx]._dram_tag = it->second;
+					dest_blk_address = it->second*_hybrid2_page_size + blk_offset*64;
 					is_dram = true;
 					is_remapped = true;
 				}
@@ -1852,694 +2031,814 @@ MemoryController::hybrid2_access(MemReq &req)
 // // ToDo : 基于热度的重映射分配机制
 // //		  如果最近分配的页面仍然驻留在热表队列中，并且有空闲的HBM空间可用，则该页面分配到HBM。否则，该页面应分配到片外DRAM。
 
-// uint64_t
-// MemoryController::bumblebee_access(MemReq& req)
-// {
-// 	switch (req.type)
-// 	{
-// 	case PUTS:
-// 	case PUTX:
-// 		*req.state = I;
-// 		break;
-// 	case GETS:
-// 		*req.state = req.is(MemReq::NOEXCL) ? S : E;
-// 		break;
-// 	case GETX:
-// 		*req.state = M;
-// 		break;
-// 	default:
-// 		panic("!?");
-// 	}
+uint64_t
+MemoryController::bumblebee_access(MemReq& req)
+{
+	switch (req.type)
+	{
+	case PUTS:
+	case PUTX:
+		*req.state = I;
+		break;
+	case GETS:
+		*req.state = req.is(MemReq::NOEXCL) ? S : E;
+		break;
+	case GETX:
+		*req.state = M;
+		break;
+	default:
+		panic("!?");
+	}
 	
-// 	if (req.type == PUTS)
-// 	{
-// 		return req.cycle;
-// 	}
-// 	ReqType type = (req.type == GETS || req.type == GETX) ? LOAD : STORE;
-// 	Address tmpAddr = req.lineAddr;
-// 	req.lineAddr = vaddr_to_paddr(req);
-// 	Address address = req.lineAddr;
-// 	// address = address / 64 * 64;
-// 	uint32_t mem_hbm_select = (address / 64) % _mem_hbm_per_mc;
-// 	// assert(4 > mem_hbm_select);
-// 	Address mem_hbm_address = (address / 64 / _mem_hbm_per_mc * 64) | (address % 64);
+	if (req.type == PUTS)
+	{
+		return req.cycle;
+	}
+	ReqType type = (req.type == GETS || req.type == GETX) ? LOAD : STORE;
+	Address tmpAddr = req.lineAddr;
+	req.lineAddr = vaddr_to_paddr(req);
+	Address address = req.lineAddr;
+	// // address = address / 64 * 64;
+	// uint32_t mem_hbm_select = (address / 64) % _mem_hbm_per_mc;
+	// // assert(4 > mem_hbm_select);
+	// Address mem_hbm_address = (address / 64 / _mem_hbm_per_mc * 64) | (address % 64);
+
+	
+	// get set and page offset in set; it's easy, so this function is not decoupled;
+	uint64_t set_id = 99999;
+	int page_offset = -1;
+	int blk_offset = -1;
+	bool is_hbm = false;
+
+	if(address < _mem_hbm_size)
+	{
+		set_id = address /  _bumblebee_page_size / bumblebee_n;
+		page_offset =  address /  _bumblebee_page_size % bumblebee_n;
+		blk_offset = address % _bumblebee_page_size % _bumblebee_blk_size;
+		is_hbm = true;
+	}
+	else
+	{
+		set_id = (address - _mem_hbm_size) / _bumblebee_page_size / bumblebee_m;
+		// 相对于set的page offset
+		page_offset =  bumblebee_n + (address - _mem_hbm_size) /  _bumblebee_page_size % bumblebee_m;
+		blk_offset = address % _bumblebee_page_size % _bumblebee_blk_size;
+	}
+	
+	assert(99999 != set_id);
+	assert(-1 != page_offset);
+
+	PLEEntry& pleEntry =  MetaGrp[set_id]._pleEntry;
+	g_vector<BLEEntry>& bleEntries =  MetaGrp[set_id]._bleEntries;
+	HotnenssTracker& hotTracker = HotnessTable[set_id];
+	uint64_t current_cycle = req.cycle;
 
 
-// 	// get set and page offset in set; it's easy, so this function is not decoupled;
-// 	uint64_t set_id = -1;
-// 	int page_offset = -1;
-// 	int blk_offset = -1;
-// 	bool is_hbm = false;
+	int total = 0;
+	for(int i = 0 ;i < bumblebee_n;i++)
+	{
+		if(pleEntry.Occupy[i]==1)total ++;
+	}
+	float res = (float)total / bumblebee_n;
+	std::cout << "HBM Occupied Ratio for set = {" << set_id <<"} is 【" << res <<"】"<< endl;
+	// std::cout << "\n\n PLE State with set id = "<< set_id << std::endl;
+	// int flag = 20;
+	// for(int i = 0;i < bumblebee_m + bumblebee_n;i++)
+	// {	if(flag == 0)
+	// 	{
+	// 		std::cout << std::endl;
+	// 		flag = 20;
+	// 	}
+	// 	std::cout << pleEntry.PLE[i] << ' ';
+	// 	flag --;
+	// }
 
-// 	if(address < _mem_hbm_size)
-// 	{
-// 		set_id = address /  _bumblebee_page_size / bumblebee_n;
-// 		page_offset =  address /  _bumblebee_page_size % bumblebee_n;
-// 		blk_offset = address % _bumblebee_page_size % _bumblebee_blk_size;
-// 		is_hbm = true;
-// 	}
-// 	else
-// 	{
-// 		set_id = (address - _mem_hbm_size) / _bumblebee_page_size / bumblebee_m;
-// 		// 相对于set的page offset
-// 		page_offset =  bumblebee_n + (address - _mem_hbm_size) /  _bumblebee_page_size % bumblebee_m;
-// 		blk_offset = address % _bumblebee_page_size % _bumblebee_blk_size;
-// 	}
+	// std::cout << "\n\n PLE Occupy State with set id = "<< set_id << std::endl;
+	// int flag_2 = 20;
+	// for(int i = 0;i < bumblebee_m + bumblebee_n;i++)
+	// {	if(flag_2 == 0)
+	// 	{
+	// 		std::cout << std::endl;
+	// 		flag_2 = 20;
+	// 	}
+	// 	std::cout << pleEntry.Occupy[i] << ' ';
+	// 	flag_2 --;
+	// }
+	std::cout << "HBMQueue Size = " << hotTracker.HBMQueue.size() << std::endl;
+	std::cout << "DRAMQueue Size = " << hotTracker.DRAMQueue.size() << std::endl;
+	std::cout <<  "Set id = " << set_id << "    ||  Page offset = " << page_offset << std::endl;
+	// page offset check_over !!
+	// std::cout << "DRAMQueue Size = " << hotTracker.DRAMQueue.size() << std::endl;
+	// std::cout << "HotTracker RH = " << hotTracker._rh << std::endl;
+	
+	// 记录bleEntries索引信息
+	// int ble_idx = -1;
+	BLEEntry bleEntry;
+	// 立即更新BLE状态
+	for(int i = 0;i<bumblebee_m+bumblebee_n;i++)
+	{
+		if(bleEntries[i].ple_idx == page_offset)
+		{
+			// std::cout << "\n\nDebugger <<<<<<<<<<<<<<<<<< !! \n" << std::endl;
+			bleEntries[i].validVector[blk_offset] = 1;
+			if(type == STORE)bleEntries[i].dirtyVector[blk_offset] = 1;
+			// ble_idx = i;
+			bleEntry = bleEntries[i];
+			break;
+			// std::cout << "\n\nDebugger <<<<<<<<<<<<<<<<<< !! \n" << std::endl;
+		}
+	}
 
-// 	assert(-1 != set_id);
-// 	assert(-1 != page_offset);
+	int SL = hotTracker._na - hotTracker._nn - hotTracker._nc;
+	std::cout << "SL = " << SL << std::endl;
 
-// 	PLEEntry pleEntry =  MetaGrp[set_id]._pleEntry;
-// 	g_vector<BLEEntry> bleEntries =  MetaGrp[set_id]._bleEntries;
-// 	HotnenssTracker hotTracker = HotnessTable[set_id];
-// 	uint64_t current_cycle = req.cycle;
+	if(SL > 0)
+	{
+		for(int i = 0; i < bumblebee_n; i++)
+		{
+			if(pleEntry.Type[i]==2)
+			{
+				if(pleEntry.Occupy[i]==0)
+				{
+					pleEntry.Type[i]=1;
+				}
+				else
+				{
+					bool has_dirty = false;
+					for(uint32_t j = 0;j < _bumblebee_page_size/_bumblebee_blk_size;j++)
+					{
+						if(bleEntries[i].dirtyVector[j]==1){
+							has_dirty = true;
+							break;
+						}
+					}
+					if(!has_dirty)pleEntry.Type[i]=1;
+				}
+			}
+		}
+	}
+	else if(SL < 0)
+	{
+		for(int i = 0;i < bumblebee_n;i++)
+		{
+			if(pleEntry.Type[i]==1)
+			{
+				pleEntry.Type[i]=2;
+			}
+		}
+	}
 
-// 	// 记录bleEntries索引信息
-// 	int ble_idx = -1;
-// 	BLEEntry bleEntry;
-// 	// 立即更新BLE状态
-// 	for(int i = 0;i<bumblebee_m+bumblebee_n;i++)
-// 	{
-// 		if(bleEntries[i].ple_idx == page_offset)
-// 		{
-// 			bleEntries[i].validVector[blk_offset] = 1;
-// 			if(type == STORE)bleEntries[i].dirtyVector[blk_offset] = 1;
-// 			ble_idx = i;
-// 			bleEntry = bleEntries[i];
-// 			break;
-// 		}
-// 	}
+	// search value(new PLE)
+	int search_idx = -1;
+	// int occpu = -1;
+	// int page_type = -1;
+	for(int i = 0; i < (bumblebee_m + bumblebee_n);i++)
+	{
+		// find page
+		if(pleEntry.PLE[i] == page_offset)
+		{
+			search_idx = i;
+			// occpu = pleEntry.Occupy[i];
+			// page_type = pleEntry.Type[i];
+			// 是有可能出现重复的，由于HBM在低地址，可能cache住了DRAM的数据，所以需要break;
+			break;
+		}
+	}
+
+	// PRT Miss
+	if(-1 == search_idx)
+	{
+		std::cout << "PRT Miss" << std::endl;
+
+		// allocate ToDo：基于热度分配和空闲页面分配 可解耦一个函数
+		// 如果最近分配的页面仍然驻留在热表队列中，并且有空闲的HBM空间可用，则该页面分配到HBM。否则，该页面应分配到片外DRAM。
+		// 论文说的轻巧，怎么定义最近分配的页面？ 
+		// HotTable 又是LRU的 最近访问的肯定不会先弹出去啊 ？
+
+		// 先根据空闲的HBM来吧
+		int free_idx = -1;
+		for(int i = 0;i < bumblebee_n ;i++)
+		{
+			if(pleEntry.Occupy[i]==0)
+			{
+				free_idx = i;
+				break;
+			}
+		}
+
+		// Notes:相当于所有的page都会一一对应，因此如果PRT Miss，则对应的set 必定存在空的page slot
+		// 		 且如果是DDR,则对应的DDR Page Slot一定未分配
+
+		// 有空闲HBM
+		if(-1 != free_idx)
+		{
+			std::cout << "PRT Miss; Has free HBM to allocate !!" << std::endl;
+			// 先分配(元数据一起修改)
+			// 最好还是不remap，先看一下原始的page_offset是否是HBM且free
+			if(page_offset < bumblebee_n && pleEntry.Occupy[page_offset]==0) free_idx = page_offset;
+			pleEntry.PLE[free_idx] = page_offset;
+			pleEntry.Occupy[free_idx] = 1;
+			pleEntry.Type[free_idx] = 1; // HBM
+
+			// 这个页表加入HBMQueue
+			QueuePage _queuePage;
+			_queuePage._page_id = page_offset; 
+			_queuePage._counter += 1;
+			_queuePage._last_mod_cycle = current_cycle;
+			hotTracker.HBMQueue.push_front(_queuePage);
+			hotTracker._rh = 0;
+			for(int i = 0;i<bumblebee_n;i++)
+			{
+				if(pleEntry.Occupy[i] == 1)
+				{
+					hotTracker._rh += 1;
+				}
+			}
+			// hotTracker._rh = (hotTracker._rh  + 1) / bumblebee_n;
+			hotTracker._na += 1;
+
+			// 所有HBM被占用,所有cHBM转变为mHBM
+			if(hotTracker._rh == bumblebee_n)
+			{
+				for(int i = 0;i < bumblebee_n;i++)
+				{
+					if(pleEntry.Type[i] == 2)
+					{
+						pleEntry.PLE[i] = -1;
+						pleEntry.Type[i] = 1;
+						pleEntry.Occupy[i] = 0;
+					}
+				}
+			}
+
+			// Access Memory (really ?)
+			// req.lineAddr = mem_hbm_address;
+			// req.cycle = _mcdram[mem_hbm_select]->access(req,0,4);
+			// req.lineAddr = tmpAddr;
+
+			// 看看是否要驱逐（支持的逻辑是我只有往HBMQueue新增Page，才有可能使得HBM占用比之前高）
+			// 驱逐逻辑是在HBM占用率较高的情况下，HBM LRU Table 的计数器长时间保持不变
+			if(hotTracker._rh >= rh_upper)
+			{
+				std::cout << "PRT Miss; Try Evict !" << std::endl;
+				tryEvict(pleEntry,hotTracker,current_cycle);
+			}
 
 
-// 	// search value(new PLE)
-// 	int search_idx = -1;
-// 	int occpu = -1;
-// 	int page_type = -1;
-// 	for(int i = 0; i < (bumblebee_m + bumblebee_n);i++)
-// 	{
-// 		// find page
-// 		if(pleEntry.PLE[i] == page_offset)
-// 		{
-// 			search_idx = i;
-// 			occpu = pleEntry.Occupy[i];
-// 			page_type = pleEntry.Type[i];
-// 			// 是有可能出现重复的，由于HBM在低地址，可能cache住了DRAM的数据，所以需要break;
-// 			break;
-// 		}
-// 	}
+		}
+		else // 没有空闲HBM
+		{
+			std::cout << "PRT Miss; Has no free HBM to allocate !!" << std::endl;
+			// 原来是DDR
+			if(page_offset > bumblebee_n)
+			{
+				// 原来的未被占用
+				// 状态位修改：DRAMQueue
+				if(pleEntry.Occupy[page_offset]==0)
+				{
+					pleEntry.PLE[page_offset] = page_offset;
+					pleEntry.Occupy[page_offset] = 1;
+					pleEntry.Type[page_offset] = 0;
 
-// 	// PRT Miss
-// 	if(-1 == search_idx)
-// 	{
-// 		// allocate ToDo：基于热度分配和空闲页面分配 可解耦一个函数
-// 		// 如果最近分配的页面仍然驻留在热表队列中，并且有空闲的HBM空间可用，则该页面分配到HBM。否则，该页面应分配到片外DRAM。
-// 		// 论文说的轻巧，怎么定义最近分配的页面？ 
-// 		// HotTable 又是LRU的 最近访问的肯定不会先弹出去啊 ？
-
-// 		// 先根据空闲的HBM来吧
-// 		int free_idx = -1;
-// 		for(int i = 0;i < bumblebee_n ;i++)
-// 		{
-// 			if(pleEntry.Occupy[i]==0)
-// 			{
-// 				free_idx = i;
-// 			}
-// 		}
-
-// 		// Notes:相当于所有的page都会一一对应，因此如果PRT Miss，则对应的set 必定存在空的page slot
-// 		// 		 且如果是DDR,则对应的DDR Page Slot一定未分配
-
-// 		// 有空闲HBM
-// 		if(-1 != free_idx)
-// 		{
-// 			// 先分配(元数据一起修改)
-// 			// 最好还是不remap，先看一下原始的page_offset是否是HBM且free
-// 			if(page_offset < bumblebee_n && pleEntry.Occupy[page_offset]==0) free_idx = page_offset;
-// 			pleEntry.PLE[free_idx] = page_offset;
-// 			pleEntry.Occupy[free_idx] = 1;
-// 			pleEntry.Type[free_idx] = 1; // HBM
-
-// 			// 这个页表加入HBMQueue
-// 			QueuePage _queuePage;
-// 			_queuePage._page_id = page_offset; 
-// 			_queuePage._counter += 1;
-// 			_queuePage._last_mod_cycle = req.cycle;
-// 			hotTracker.HBMQueue.push_front(_queuePage);
-// 			hotTracker._rh = 0;
-// 			for(int i = 0;i<bumblebee_n;i++)
-// 			{
-// 				if(pleEntry.Occupy[i] == 1)
-// 				{
-// 					hotTracker._rh += 1;
-// 				}
-// 			}
-// 			// hotTracker._rh = (hotTracker._rh  + 1) / bumblebee_n;
-// 			hotTracker._na += 1;
-
-// 			// 所有HBM被占用,所有cHBM转变为mHBM
-// 			if(hotTracker._rh == bumblebee_n)
-// 			{
-// 				for(int i = 0;i < bumblebee_n;i++)
-// 				{
-// 					if(pleEntry.Type[i] == 2)
-// 					{
-// 						pleEntry.PLE[i] = -1;
-// 						pleEntry.Type[i] = 1;
-// 						pleEntry.Occupy[i] = 0;
-// 					}
-// 				}
-// 			}
-
-// 			// Access Memory (really ?)
-// 			// req.lineAddr = mem_hbm_address;
-// 			// req.cycle = _mcdram[mem_hbm_select]->access(req,0,4);
-// 			// req.lineAddr = tmpAddr;
-
-// 			// 看看是否要驱逐（支持的逻辑是我只有往HBMQueue新增Page，才有可能使得HBM占用比之前高）
-// 			// 驱逐逻辑是在HBM占用率较高的情况下，HBM LRU Table 的计数器长时间保持不变
-// 			if(hotTracker._rh >= rh_upper)
-// 			{
-// 				tryEvict(pleEntry,hotTracker,current_cycle);
-// 			}
-
-
-// 		}
-// 		else // 没有空闲HBM
-// 		{
-// 			// 原来是DDR
-// 			if(page_offset > bumblebee_n)
-// 			{
-// 				// 原来的未被占用
-// 				// 状态位修改：DRAMQueue
-// 				if(pleEntry.Occupy[page_offset]==0)
-// 				{
-// 					pleEntry.PLE[page_offset] = page_offset;
-// 					pleEntry.Occupy[page_offset] = 1;
-// 					pleEntry.Type[page_offset] = 0;
-
-// 					QueuePage _ddr_page;
-// 					_ddr_page._page_id=page_offset;
-// 					_ddr_page._counter=1;
-// 					_ddr_page._last_mod_cycle=current_cycle;
-// 					hotTracker.DRAMQueue.push_front(_ddr_page);
-// 				}
-// 				else // 原来的被占用  状态位修改：DRAMQueue
-// 				{ 
-// 					int free_ddr = -1;
-// 					for(int i = bumblebee_n; i <bumblebee_m + bumblebee_n;i++)
-// 					{
-// 						if(pleEntry.Occupy[i] == 0)
-// 						{
-// 							free_ddr = i;
-// 							break;
-// 						}
-// 					}
-// 					if(free_ddr != -1)
-// 					{
-// 						pleEntry.PLE[free_idx] = page_offset;
-// 						pleEntry.Occupy[free_idx] = 1;
-// 						pleEntry.Type[free_idx] = 0;
+					QueuePage _ddr_page;
+					_ddr_page._page_id=page_offset;
+					_ddr_page._counter=1;
+					_ddr_page._last_mod_cycle=current_cycle;
+					hotTracker.DRAMQueue.push_front(_ddr_page);
+				}
+				else // 原来的被占用  状态位修改：DRAMQueue
+				{ 
+					int free_ddr = -1;
+					for(int i = bumblebee_n; i <bumblebee_m + bumblebee_n;i++)
+					{
+						if(pleEntry.Occupy[i] == 0)
+						{
+							free_ddr = i;
+							break;
+						}
+					}
+					if(free_ddr != -1)
+					{
+						pleEntry.PLE[free_idx] = page_offset;
+						pleEntry.Occupy[free_idx] = 1;
+						pleEntry.Type[free_idx] = 0;
 						
-// 					}
-// 					else
-// 					{
-// 						// 理论上是不会走到这里的
-// 						pleEntry.PLE[page_offset] = page_offset;
-// 						pleEntry.Occupy[page_offset] = 1;
-// 						pleEntry.Type[page_offset] = 0;	
-// 					}
-// 					QueuePage _ddr_page;
-// 					_ddr_page._page_id=page_offset;
-// 					_ddr_page._counter=1;
-// 					_ddr_page._last_mod_cycle=current_cycle;
-// 					hotTracker.DRAMQueue.push_front(_ddr_page);
-// 				}
-// 			}
-// 			else
-// 			{
-// 				bool should_find_ddr = false;
-// 				// 原来不是DDR，是HBM，而HBM全被占用
-// 				// 查看对应状态
-// 				if(pleEntry.Type[page_offset] == 2)
-// 				{
-// 					// cHBM
-// 					// 看看原来cache的是DDR还是HBM
+					}
+					else
+					{
+						// 理论上是不会走到这里的
+						pleEntry.PLE[page_offset] = page_offset;
+						pleEntry.Occupy[page_offset] = 1;
+						pleEntry.Type[page_offset] = 0;	
+					}
+					QueuePage _ddr_page;
+					_ddr_page._page_id=page_offset;
+					_ddr_page._counter=1;
+					_ddr_page._last_mod_cycle=current_cycle;
+					hotTracker.DRAMQueue.push_front(_ddr_page);
+				}
+			}
+			else
+			{
+				bool should_find_ddr = false;
+				// 原来不是DDR，是HBM，而HBM全被占用
+				// 查看对应状态
+				if(pleEntry.Type[page_offset] == 2)
+				{
+					// cHBM
+					// 看看原来cache的是DDR还是HBM
 
-// 					if(pleEntry.PLE[page_offset] > bumblebee_n)
-// 					{
-// 						// DDR 直接写回（有dirty）置空（如果dirty）
-// 						pleEntry.PLE[page_offset] = page_offset;
-// 						pleEntry.Occupy[page_offset] = 1;
-// 						pleEntry.Type[page_offset] = 2;	
+					if(pleEntry.PLE[page_offset] > bumblebee_n)
+					{
+						// DDR 直接写回（有dirty）置空（如果dirty）
+						pleEntry.PLE[page_offset] = page_offset;
+						pleEntry.Occupy[page_offset] = 1;
+						pleEntry.Type[page_offset] = 2;	
 
-// 						QueuePage _hbm_page;
-// 						_hbm_page._page_id = page_offset;
-// 						_hbm_page._counter = 1;
-// 						_hbm_page._last_mod_cycle = current_cycle;
-// 						hotTracker.HBMQueue.push_front(_hbm_page);
-// 						// 原来都没有触发HBMQueue
-// 					}
-// 					else
-// 					{
-// 						// 否则看看DDR是否有空
-// 						should_find_ddr = true;
-// 					}
-// 				}
-// 				else
-// 				{
-// 					should_find_ddr = true;
-// 				}
+						QueuePage _hbm_page;
+						_hbm_page._page_id = page_offset;
+						_hbm_page._counter = 1;
+						_hbm_page._last_mod_cycle = current_cycle;
+						hotTracker.HBMQueue.push_front(_hbm_page);
+						// 原来都没有触发HBMQueue
+					}
+					else
+					{
+						// 否则看看DDR是否有空
+						should_find_ddr = true;
+					}
+				}
+				else
+				{
+					should_find_ddr = true;
+				}
 
-// 				if(should_find_ddr)
-// 				{
-// 					int free_ddr = -1;
-// 					for(int i = bumblebee_n;i<bumblebee_m +bumblebee_n;i++)
-// 					{
-// 						if(pleEntry.Occupy[i]==0)
-// 						{
-// 							free_ddr = i;
-// 							break;
-// 						}
-// 					}
+				if(should_find_ddr)
+				{
+					int free_ddr = -1;
+					for(int i = bumblebee_n;i<bumblebee_m +bumblebee_n;i++)
+					{
+						if(pleEntry.Occupy[i]==0)
+						{
+							free_ddr = i;
+							break;
+						}
+					}
 
-// 					if(-1 == free_ddr)
-// 					{
-// 						// DDR HBM全满，所有cHBM 变为 mHBM
+					if(-1 == free_ddr)
+					{
+						// DDR HBM全满，所有cHBM 变为 mHBM
 
-// 						// 状态位修改： nc na nn
-// 						int turn_hbm_idx = -1;
-// 						for(int i = 0;i<bumblebee_n;i++)
-// 						{
-// 							if(pleEntry.Type[i]==2)
-// 							{
-// 								pleEntry.Type[i] = 1;
-// 								turn_hbm_idx = i;
-// 							}
-// 						}
-// 						if(turn_hbm_idx == -1)
-// 						{
-// 							// 这是不可能的assert(false)
-// 							// 如果遇到了，direct mapping
-// 							pleEntry.PLE[page_offset] = page_offset;
-// 							pleEntry.Occupy[page_offset] = 1;
-// 							pleEntry.Type[page_offset] = 1;
-// 						}
-// 						else
-// 						{
-// 							pleEntry.PLE[turn_hbm_idx] = page_offset;
-// 							pleEntry.Occupy[turn_hbm_idx] = 1;
-// 							pleEntry.Type[turn_hbm_idx] = 1;
-// 						}
+						// 状态位修改： nc na nn
+						int turn_hbm_idx = -1;
+						for(int i = 0;i<bumblebee_n;i++)
+						{
+							if(pleEntry.Type[i]==2)
+							{
+								pleEntry.Type[i] = 1;
+								turn_hbm_idx = i;
+							}
+						}
+						if(turn_hbm_idx == -1)
+						{
+							// 这是不可能的assert(false)
+							// 如果遇到了，direct mapping
+							pleEntry.PLE[page_offset] = page_offset;
+							pleEntry.Occupy[page_offset] = 1;
+							pleEntry.Type[page_offset] = 1;
+						}
+						else
+						{
+							pleEntry.PLE[turn_hbm_idx] = page_offset;
+							pleEntry.Occupy[turn_hbm_idx] = 1;
+							pleEntry.Type[turn_hbm_idx] = 1;
+						}
 
-// 						hotTracker._rh=0;
-// 						hotTracker._nc=0;
-// 						hotTracker._na=0;
-// 						hotTracker._nn=0;
+						hotTracker._rh=0;
+						hotTracker._nc=0;
+						hotTracker._na=0;
+						hotTracker._nn=0;
 
-// 						for(int i=0;i<bumblebee_n;i++)
-// 						{
-// 							if(pleEntry.Type[i]==2)assert(false);
-// 							if(pleEntry.Type[i]==1 && pleEntry.Occupy[i]==1)hotTracker._na += 1;
-// 							if(pleEntry.Type[i]==1 && pleEntry.Occupy[i]==0)hotTracker._nn += 1;
-// 							if(pleEntry.Occupy[i]==1)hotTracker._rh += 1;
-// 						}
+						for(int i=0;i<bumblebee_n;i++)
+						{
+							if(pleEntry.Type[i]==2)assert(false);
+							if(pleEntry.Type[i]==1 && pleEntry.Occupy[i]==1)hotTracker._na += 1;
+							if(pleEntry.Type[i]==1 && pleEntry.Occupy[i]==0)hotTracker._nn += 1;
+							if(pleEntry.Occupy[i]==1)hotTracker._rh += 1;
+						}
 
-// 						QueuePage _hbm_page;
-// 						_hbm_page._page_id = page_offset;
-// 						_hbm_page._counter = 1;
-// 						_hbm_page._last_mod_cycle = current_cycle;
-// 						hotTracker.HBMQueue.push_front(_hbm_page);
-// 						// 这么高占用早就该判断是否踢掉了
-// 						// 到时候把这一段抽象出来吧
-// 						if(hotTracker._rh > rh_upper)tryEvict(pleEntry,hotTracker,current_cycle);
-// 					}
-// 					else
-// 					{
-// 						// 分配到对应DDR
-// 						pleEntry.PLE[free_ddr] = page_offset;
-// 						pleEntry.Occupy[free_ddr] = 1;
-// 						pleEntry.Type[free_ddr] = 0;
+						QueuePage _hbm_page;
+						_hbm_page._page_id = page_offset;
+						_hbm_page._counter = 1;
+						_hbm_page._last_mod_cycle = current_cycle;
+						hotTracker.HBMQueue.push_front(_hbm_page);
+						// 这么高占用早就该判断是否踢掉了
+						// 到时候把这一段抽象出来吧
+						if(hotTracker._rh > rh_upper)tryEvict(pleEntry,hotTracker,current_cycle);
+					}
+					else
+					{
+						// 分配到对应DDR
+						pleEntry.PLE[free_ddr] = page_offset;
+						pleEntry.Occupy[free_ddr] = 1;
+						pleEntry.Type[free_ddr] = 0;
 
-// 						QueuePage _ddr_page;
-// 						_ddr_page._page_id=page_offset;
-// 						_ddr_page._counter=1;
-// 						_ddr_page._last_mod_cycle=current_cycle;
-// 						hotTracker.DRAMQueue.push_front(_ddr_page);
-// 					}
-// 				}
-// 			}
-// 		}
+						QueuePage _ddr_page;
+						_ddr_page._page_id=page_offset;
+						_ddr_page._counter=1;
+						_ddr_page._last_mod_cycle=current_cycle;
+						hotTracker.DRAMQueue.push_front(_ddr_page);
+					}
+				}
+			}
+		}
 		
 
-// 		// 分配完，看看现在到底是在什么介质里
-// 		int dest_idx = -1;
-// 		for(int i = 0;i<bumblebee_m +bumblebee_n;i++)
-// 		{
-// 			if(pleEntry.PLE[i]==page_offset)
-// 			{
-// 				dest_idx = i;
-// 			}
-// 		}
+		// 分配完，看看现在到底是在什么介质里
+		int dest_idx = -1;
+		for(int i = 0;i<bumblebee_m +bumblebee_n;i++)
+		{
+			if(pleEntry.PLE[i]==page_offset)
+			{
+				dest_idx = i;
+			}
+		}
 
-// 		is_hbm = dest_idx > bumblebee_n ? false:true;
+		is_hbm = dest_idx > bumblebee_n ? false:true;
 
-// 		if(is_hbm)
-// 		{
-// 			req.lineAddr = mem_hbm_address;
-// 			req.cycle = _mcdram[mem_hbm_select]->access(req,0,4);
-// 			req.lineAddr = tmpAddr;
+		if(is_hbm)
+		{
+			std::cout << "PRT Miss; Access HBM !!" << std::endl;
+			Address dest_addr = getDestAddress(set_id,dest_idx,page_offset,blk_offset);
+			uint32_t mem_hbm_select = (dest_addr / 64) % _mem_hbm_per_mc;
+			Address mem_hbm_address = (dest_addr/ 64 / _mem_hbm_per_mc * 64) | (dest_addr % 64);
+			req.lineAddr = mem_hbm_address;
+			req.cycle = _mcdram[mem_hbm_select]->access(req,0,4);
+			req.lineAddr = tmpAddr;
 
-// 			// update metadata
+			// update metadata
 
-// 			futex_unlock(&_lock);
-// 			return req.cycle;
-// 		}
-// 		else
-// 		{
-// 			req.cycle = _ext_dram->access(req,0,4);
-// 			req.lineAddr = tmpAddr;
+			futex_unlock(&_lock);
+			return req.cycle;
+		}
+		else
+		{
+			std::cout << "PRT Miss; Access DRAM !!" << std::endl;
+			Address dest_addr = getDestAddress(set_id,dest_idx,page_offset,blk_offset);
+			req.lineAddr = dest_addr;
+			req.cycle = _ext_dram->access(req,0,4);
+			req.lineAddr = tmpAddr;
 
-// 			// update metadata
+			// update metadata
 
-// 			futex_unlock(&_lock);
-// 			return req.cycle;
-// 		}
+			futex_unlock(&_lock);
+			return req.cycle;
+		}
 
-// 	}
+	}
 
-// 	// PRT Hit
-// 	int dest_mem_idx = -1;
+	std::cout << "PRT Hit" << std::endl;
+	// PRT Hit
+	int dest_mem_idx = -1;
 	
-// 	for(int i = 0;i < bumblebee_m + bumblebee_n; i++)
-// 	{
-// 		if(pleEntry.PLE[i] == page_offset)
-// 		{
-// 			dest_mem_idx = i;
-// 		}
-// 	}
+	for(int i = 0;i < bumblebee_m + bumblebee_n; i++)
+	{
+		if(pleEntry.PLE[i] == page_offset)
+		{
+			dest_mem_idx = i;
+		}
+	}
 
-// 	bool is_access_hbm = false;
-// 	// 先更新QueuePage的counter
-// 	// 两个Queue可以一起遍历，都是常数且一个数量级的开销
+	bool is_access_hbm = false;
+	// 先更新QueuePage的counter
+	// 两个Queue可以一起遍历，都是常数且一个数量级的开销
 
-// 	//Notes: g_list继承std::list 迭代器指向元素本身；g_list为手动实现的list时，请使用引用类型 ！
-// 	bool is_push = false;
-// 	for(auto it = hotTracker.HBMQueue.begin();it != hotTracker.HBMQueue.end();++it)
-// 	{
-// 		if(it->_page_id == page_offset)
-// 		{
-// 			it->_counter += 1;
-// 			it->_last_mod_cycle = current_cycle;
-// 			break;
-// 		}
-// 		if(it == hotTracker.HBMQueue.end())
-// 		{
-// 			QueuePage _hbm_page;
-// 			_hbm_page._counter = 1;
-// 			_hbm_page._last_mod_cycle = current_cycle;
-// 			_hbm_page._page_id = page_offset;
-// 			hotTracker.HBMQueue.push_front(_hbm_page);
-// 			is_push = true;
-// 		}
-// 	}
-// 	// 每次push都有可能触发驱逐
-// 	if(is_push && hotTracker._rh > rh_upper)
-// 	{
-// 		tryEvict(pleEntry,hotTracker,current_cycle);
-// 	}
+	//Notes: g_list继承std::list 迭代器指向元素本身；g_list为手动实现的list时，请使用引用类型 ！
+	bool is_push = false;
+	for(auto it = hotTracker.HBMQueue.begin();it != hotTracker.HBMQueue.end();++it)
+	{
+		if(it->_page_id == page_offset)
+		{
+			it->_counter += 1;
+			it->_last_mod_cycle = current_cycle;
+			break;
+		}
+		if(it == hotTracker.HBMQueue.end())
+		{
+			QueuePage _hbm_page;
+			_hbm_page._counter = 1;
+			_hbm_page._last_mod_cycle = current_cycle;
+			_hbm_page._page_id = page_offset;
+			hotTracker.HBMQueue.push_front(_hbm_page);
+			is_push = true;
+		}
+	}
+	// 每次push都有可能触发驱逐
+	if(is_push && hotTracker._rh > rh_upper)
+	{
+		std::cout << "PRT Hit; Try Evict !" << std::endl;
+		tryEvict(pleEntry,hotTracker,current_cycle);
+	}
 
-// 	for(auto it = hotTracker.DRAMQueue.begin();it != hotTracker.DRAMQueue.end();++it)
-// 	{
-// 		if(it->_page_id == page_offset)
-// 		{
-// 			it->_counter += 1;
-// 			it->_last_mod_cycle = current_cycle;
-// 			break;
-// 		}
-// 		if(it == hotTracker.DRAMQueue.end())
-// 		{
-// 			QueuePage _dram_page;
-// 			_dram_page._counter = 1;
-// 			_dram_page._last_mod_cycle = current_cycle;
-// 			_dram_page._page_id = page_offset;
-// 			hotTracker.DRAMQueue.push_front(_dram_page);
-// 		}
-// 	}
+	for(auto it = hotTracker.DRAMQueue.begin();it != hotTracker.DRAMQueue.end();++it)
+	{
+		if(it->_page_id == page_offset)
+		{
+			it->_counter += 1;
+			it->_last_mod_cycle = current_cycle;
+			break;
+		}
+		if(it == hotTracker.DRAMQueue.end())
+		{
+			QueuePage _dram_page;
+			_dram_page._counter = 1;
+			_dram_page._last_mod_cycle = current_cycle;
+			_dram_page._page_id = page_offset;
+			hotTracker.DRAMQueue.push_front(_dram_page);
+		}
+	}
 
-// 	// 如果是HBM
-// 	if(dest_mem_idx < bumblebee_n)
-// 	{
-// 		is_access_hbm = true;
-// 		// update metadata
-// 		if(pleEntry.Type[dest_mem_idx] == 2)hotTracker._nc += 1;
-// 		if(pleEntry.Type[dest_mem_idx] == 1)hotTracker._na += 1;
-// 		hotTracker._nn = bumblebee_n - hotTracker._nc - hotTracker._na;
-// 	}
-// 	else
-// 	{
-// 		// 否则是DRAM
-// 		// lookup BLE (page_offset来索引的)
-// 		// if page_cached
-// 		if(pleEntry.Type[dest_mem_idx]==2)
-// 		{
-// 			// indicates page is cached, then check whether the block is hit
-// 			bool block_hit = bleEntry.validVector[blk_offset] ? true:false;
-// 			if(block_hit)
-// 			{
-// 				is_access_hbm = true;
-// 			}
-// 			else
-// 			{
-// 				is_access_hbm = false;
+	// 如果是HBM
+	if(dest_mem_idx < bumblebee_n)
+	{
+		is_access_hbm = true;
+		// update metadata
+		if(pleEntry.Type[dest_mem_idx] == 2)hotTracker._nc += 1;
+		if(pleEntry.Type[dest_mem_idx] == 1)hotTracker._na += 1;
+		hotTracker._nn = bumblebee_n - hotTracker._nc - hotTracker._na;
+	}
+	else
+	{
+		// 否则是DRAM
+		// lookup BLE (page_offset来索引的)
+		// if page_cached
+		if(pleEntry.Type[dest_mem_idx]==2)
+		{
+			// indicates page is cached, then check whether the block is hit
+			bool block_hit = bleEntry.validVector[blk_offset] ? true:false;
+			if(block_hit)
+			{
+				is_access_hbm = true;
+			}
+			else
+			{
+				is_access_hbm = false;
 
-// 			}
-// 		}
-// 		else
-// 		{
-// 			is_access_hbm = false;
-// 		}
+			}
+		}
+		else
+		{
+			is_access_hbm = false;
+		}
 		
 		
-// 	}
-
-// 	if(is_access_hbm)
-// 	{
-// 		req.lineAddr = mem_hbm_address;
-// 		req.cycle = _mcdram[mem_hbm_select]->access(req,0,4);
-// 		req.lineAddr = tmpAddr;
-
-// 		futex_unlock(&_lock);
-// 		return req.cycle;
-// 	}
-// 	else
-// 	{
-// 		req.cycle = _ext_dram->access(req,0,4);
-// 		req.lineAddr = tmpAddr;
-// 		futex_unlock(&_lock);
-// 		return req.cycle;
-// 	}
+	}
 
 
-// 	// 	执行流不应该执行到这里才返回
-// 	assert(false);
-// 	req.lineAddr = tmpAddr;
-// 	return req.cycle;
-// }
 
-// void
-// MemoryController::tryEvict(PLEEntry& pleEntry,HotnenssTracker& hotTracker,uint64_t current_cycle)
-// {
-// 	QueuePage endPage = hotTracker.HBMQueue.back();
-// 	int endPageOffset = endPage._page_id;
-// 	// 根据value 找到 idx
-// 	int endPageIdx = -1;
-// 	for(int i = 0;i < bumblebee_m + bumblebee_n;i++)
-// 	{
-// 		if(endPageOffset == pleEntry.PLE[i])
-// 		{
-// 			endPageIdx = i;
-// 			break;
-// 		}
-// 	}
-// 	assert(endPageIdx != -1);
-// 	int end_page_type = pleEntry.Type[endPageIdx];
-// 	int end_page_busy = pleEntry.Occupy[endPageIdx];
+	if(is_access_hbm)
+	{
+		std::cout << "PRT Hit; Access HBM !!" << std::endl;
+		Address dest_addr = getDestAddress(set_id,dest_mem_idx,page_offset,blk_offset);
+		uint32_t mem_hbm_select = (dest_addr / 64) % _mem_hbm_per_mc;
+		Address mem_hbm_address = (dest_addr/ 64 / _mem_hbm_per_mc * 64) | (dest_addr % 64);
+		req.lineAddr = mem_hbm_address;
+		req.cycle = _mcdram[mem_hbm_select]->access(req,0,4);
+		req.lineAddr = tmpAddr;
 
-// 	if(current_cycle - endPage._last_mod_cycle > long_time)
-// 	{
-// 		// 僵尸页面
-// 		QueuePage swap_page;
-// 		bool swap_empty = true;
-// 		uint64_t swap_value = -1;
-// 		uint64_t swap_idx = -1;
+		futex_unlock(&_lock);
+		return req.cycle;
+	}
+	else
+	{
+		std::cout << "PRT Hit; Access DRAM !!" << std::endl;
+		Address dest_addr = getDestAddress(set_id,dest_mem_idx,page_offset,blk_offset);
+		req.lineAddr = dest_addr;
+		req.cycle = _ext_dram->access(req,0,4);
+		req.lineAddr = tmpAddr;
+		futex_unlock(&_lock);
+		return req.cycle;
+	}
 
-// 		if(hotTracker.DRAMQueue.size() > 0)
-// 		{
-// 			swap_page = hotTracker.DRAMQueue.front();  // 先把DRAMQueue 的 front取出来
-// 			swap_empty = false;
-// 		}
 
-// 		if(!swap_empty)
-// 		{
-// 			swap_value = swap_page._page_id;
-// 			for(int i = 0;i< bumblebee_m + bumblebee_n;i++)
-// 			{
-// 				if(swap_value == pleEntry.PLE[i])
-// 				{
-// 					swap_idx = i;
-// 					break;
-// 				}
-// 			}
-// 		}
+	// 	执行流不应该执行到这里才返回
+	assert(false);
+	req.lineAddr = tmpAddr;
+	return req.cycle;
+}
 
-// 		// 驱逐操作
-// 		bool ddr_empty = false;
-// 		int ddr_empty_idx = -1;
-// 		for(int i =bumblebee_n ; i<bumblebee_m+bumblebee_n;i++)
-// 		{
-// 			if(pleEntry.Occupy[i]==0)
-// 			{
-// 				ddr_empty = true;
-// 				ddr_empty_idx = i;
-// 			}
-// 		}
 
-// 		if(ddr_empty) // ddr有空
-// 		{
-// 			// 如果是cacheHBM,直接分配空DDR
-// 			// // 状态变化为：cHBM未占用未分配，nc - 1,rh - 1
-// 			if(end_page_type == 2)
-// 			{
-// 				pleEntry.PLE[ddr_empty_idx] = endPageOffset;
-// 				pleEntry.Occupy[ddr_empty_idx] = 1;
-// 				pleEntry.Type[ddr_empty_idx] = 0;
+Address
+MemoryController::getDestAddress(uint64_t set_id,int idx,int page_offset,int blk_offset)
+{
+	Address dest_address = 1;
+	if(idx > bumblebee_n)
+	{
+		// indicates dram
+		dest_address = _mem_hbm_size + set_id * bumblebee_m * _bumblebee_page_size + (idx - bumblebee_n)*_bumblebee_page_size + blk_offset*_bumblebee_blk_size;
+	}
+	else
+	{
+		// indicates HBM
+		dest_address = set_id * bumblebee_n * _bumblebee_page_size + idx*_bumblebee_page_size + page_offset * _bumblebee_page_size + blk_offset * _bumblebee_blk_size;
+	}
+	return dest_address;
+}
 
-// 				hotTracker.HBMQueue.pop_back();
-// 				hotTracker.DRAMQueue.push_front(endPage);
+void
+MemoryController::tryEvict(PLEEntry& pleEntry,HotnenssTracker& hotTracker,uint64_t current_cycle)
+{
+	QueuePage endPage = hotTracker.HBMQueue.back();
+	int endPageOffset = endPage._page_id;
+	// 根据value 找到 idx
+	int endPageIdx = -1;
+	for(int i = 0;i < bumblebee_m + bumblebee_n;i++)
+	{
+		if(endPageOffset == pleEntry.PLE[i])
+		{
+			endPageIdx = i;
+			break;
+		}
+	}
+	assert(endPageIdx != -1);
+	int end_page_type = pleEntry.Type[endPageIdx];
+	// int end_page_busy = pleEntry.Occupy[endPageIdx];
 
-// 				pleEntry.PLE[endPageIdx] = -1;
-// 				pleEntry.Occupy[endPageIdx] = 0;
-// 				pleEntry.Type[endPageIdx] = 2; // keep cache mode ,but no allocated page
-// 			}
-// 			else // ddr有空，但是endPage是MHBM。缓冲一下，MHBM=>CHBM 状态变化为：mHBM - 1;cHBM + 1
-// 			{
-// 				pleEntry.Type[endPageIdx] = 2;
-// 				pleEntry.Occupy[endPageIdx] = 1;
+	if(current_cycle - endPage._last_mod_cycle > long_time)
+	{
+		// 僵尸页面
+		QueuePage swap_page;
+		bool swap_empty = true;
+		int swap_value = -1;
+		int swap_idx = -1;
 
-// 				hotTracker._na = 0;
-// 				hotTracker._nn = 0;
-// 				hotTracker._nc = 0;
+		if(hotTracker.DRAMQueue.size() > 0)
+		{
+			swap_page = hotTracker.DRAMQueue.front();  // 先把DRAMQueue 的 front取出来
+			swap_empty = false;
+		}
 
-// 				for(int i = 0;i<bumblebee_n;i++)
-// 				{
-// 					// mHBM被访问
-// 					if(pleEntry.Occupy[i]==1 && pleEntry.Type[i]==1)
-// 					{
-// 						hotTracker._na += 1;
-// 					}
-// 					// mHBM未被访问
-// 					if(pleEntry.Occupy[i]==0 && pleEntry.Type[i]==1)
-// 					{
-// 						hotTracker._nn += 1;
-// 					}
-// 					if(pleEntry.Type[i] == 2)
-// 					{
-// 						hotTracker._nc += 1;
-// 					}
-// 				}
-// 			}
-// 		}
-// 		else // ddr非空
-// 		{
-// 			// get swap page 已经得到了
-// 			// 判断是否为空，已经判断了
-// 			if(!swap_empty)
-// 			{
-// 				// 不存在swap page （理论上概率极低，但存在可能，采取随机swap）
-// 				// DDR没有空的 DRAMQueue又没有元素 想想就是小概率事件
-// 				// 状态位变化，ple,
+		if(!swap_empty)
+		{
+			swap_value = swap_page._page_id;
+			for(int i = 0;i< bumblebee_m + bumblebee_n;i++)
+			{
+				if(swap_value == pleEntry.PLE[i])
+				{
+					swap_idx = i;
+					break;
+				}
+			}
+		}
 
-// 				int random_idx = current_cycle % bumblebee_m + bumblebee_n - 1;
-// 				pleEntry.PLE[endPageIdx] = pleEntry.PLE[random_idx];
-// 				pleEntry.Occupy[endPageIdx] = pleEntry.Occupy[random_idx];
+		// 驱逐操作
+		bool ddr_empty = false;
+		int ddr_empty_idx = -1;
+		for(int i =bumblebee_n ; i<bumblebee_m+bumblebee_n;i++)
+		{
+			if(pleEntry.Occupy[i]==0)
+			{
+				ddr_empty = true;
+				ddr_empty_idx = i;
+			}
+		}
 
-// 				pleEntry.PLE[random_idx] = endPage._page_id;
-// 				pleEntry.Occupy[random_idx] = 1;
-// 			}
-// 			else
-// 			{
-// 				// swap page存在
-// 				// endPage的温度是否超过swap page的温度？
-// 				if(endPage._counter < swap_page._counter)
-// 				{
-// 					// 即将evict的page比另一个页面冷才会evict
-// 					if(end_page_type == 2)
-// 					{
-// 						// 如果是cache mode
-// 						// 如果cache的是DDR 写回即可
-// 						// 状态变化：cHBM不占用，rh - 1，nc - 1 
-// 						if(endPageOffset > bumblebee_n)
-// 						{
-// 							pleEntry.PLE[endPageIdx] = -1;
-// 							pleEntry.Occupy[endPageIdx] = 0;
-// 							pleEntry.Type[endPageIdx] = 2;
+		if(ddr_empty) // ddr有空
+		{
+			// 如果是cacheHBM,直接分配空DDR
+			// // 状态变化为：cHBM未占用未分配，nc - 1,rh - 1
+			if(end_page_type == 2)
+			{
+				pleEntry.PLE[ddr_empty_idx] = endPageOffset;
+				pleEntry.Occupy[ddr_empty_idx] = 1;
+				pleEntry.Type[ddr_empty_idx] = 0;
 
-// 							hotTracker._rh -= 1;
-// 							hotTracker._nc -= 1;
+				hotTracker.HBMQueue.pop_back();
+				hotTracker.DRAMQueue.push_front(endPage);
 
-// 							hotTracker.HBMQueue.pop_back();
-// 						}
-// 						else // 如果cache的是HBM 需要和swap page swap
-// 						{
-// 							// 状态位变化:ple相关状态变化，hotTracked保持不变
-// 							pleEntry.PLE[endPageIdx] = pleEntry.PLE[swap_idx];
-// 							pleEntry.Occupy[endPageIdx] = pleEntry.Occupy[swap_idx];
+				pleEntry.PLE[endPageIdx] = -1;
+				pleEntry.Occupy[endPageIdx] = 0;
+				pleEntry.Type[endPageIdx] = 2; // keep cache mode ,but no allocated page
+			}
+			else // ddr有空，但是endPage是MHBM。缓冲一下，MHBM=>CHBM 状态变化为：mHBM - 1;cHBM + 1
+			{
+				pleEntry.Type[endPageIdx] = 2;
+				pleEntry.Occupy[endPageIdx] = 1;
 
-// 							pleEntry.PLE[swap_idx]=endPageOffset;
-// 							pleEntry.Occupy[swap_idx] = 1;
+				hotTracker._na = 0;
+				hotTracker._nn = 0;
+				hotTracker._nc = 0;
 
-// 							hotTracker.HBMQueue.pop_back();
-// 							hotTracker.DRAMQueue.pop_front();
-// 							hotTracker.DRAMQueue.push_front(endPage);
-// 							hotTracker.HBMQueue.push_front(swap_page);
-// 						}
-// 					}
-// 					else
-// 					{
-// 						// 只能是mem模式 缓冲一下 mHBM => cHBM
-// 						// 状态位变化：ple,nc + 1,mHBM -1 
-// 						pleEntry.Type[endPageIdx] = 2;
-// 						pleEntry.Occupy[endPageIdx] = 1;
-// 						hotTracker._na = 0;
-// 						hotTracker._nn = 0;
-// 						hotTracker._nc = 0;
+				for(int i = 0;i<bumblebee_n;i++)
+				{
+					// mHBM被访问
+					if(pleEntry.Occupy[i]==1 && pleEntry.Type[i]==1)
+					{
+						hotTracker._na += 1;
+					}
+					// mHBM未被访问
+					if(pleEntry.Occupy[i]==0 && pleEntry.Type[i]==1)
+					{
+						hotTracker._nn += 1;
+					}
+					if(pleEntry.Type[i] == 2)
+					{
+						hotTracker._nc += 1;
+					}
+				}
+			}
+		}
+		else // ddr非空
+		{
+			// get swap page 已经得到了
+			// 判断是否为空，已经判断了
+			if(!swap_empty)
+			{
+				// 不存在swap page （理论上概率极低，但存在可能，采取随机swap）
+				// DDR没有空的 DRAMQueue又没有元素 想想就是小概率事件
+				// 状态位变化，ple,
 
-// 						for(int i = 0;i<bumblebee_n;i++)
-// 						{
-// 							// mHBM被访问
-// 							if(pleEntry.Occupy[i]==1 && pleEntry.Type[i]==1)
-// 							{
-// 								hotTracker._na += 1;
-// 							}
+				int random_idx = current_cycle % bumblebee_m + bumblebee_n - 1;
+				pleEntry.PLE[endPageIdx] = pleEntry.PLE[random_idx];
+				pleEntry.Occupy[endPageIdx] = pleEntry.Occupy[random_idx];
 
-// 							// mHBM未被访问
-// 							if(pleEntry.Occupy[i]==0 && pleEntry.Type[i]==1)
-// 							{
-// 								hotTracker._nn += 1;
-// 							}
+				pleEntry.PLE[random_idx] = endPage._page_id;
+				pleEntry.Occupy[random_idx] = 1;
+			}
+			else
+			{
+				// swap page存在
+				// endPage的温度是否超过swap page的温度？
+				if(endPage._counter < swap_page._counter)
+				{
+					// 即将evict的page比另一个页面冷才会evict
+					if(end_page_type == 2)
+					{
+						// 如果是cache mode
+						// 如果cache的是DDR 写回即可
+						// 状态变化：cHBM不占用，rh - 1，nc - 1 
+						if(endPageOffset > bumblebee_n)
+						{
+							pleEntry.PLE[endPageIdx] = -1;
+							pleEntry.Occupy[endPageIdx] = 0;
+							pleEntry.Type[endPageIdx] = 2;
 
-// 							if(pleEntry.Type[i] == 2)
-// 							{
-// 								hotTracker._nc += 1;
-// 							}
-// 						}
-// 					}
-// 				}
-// 				// else {} 不驱逐，就什么也不用做
-// 			}
-// 		} 
-// 	}// else {} 不是僵尸页面
-// }
+							hotTracker._rh -= 1;
+							hotTracker._nc -= 1;
+
+							hotTracker.HBMQueue.pop_back();
+						}
+						else // 如果cache的是HBM 需要和swap page swap
+						{
+							// 状态位变化:ple相关状态变化，hotTracked保持不变
+							pleEntry.PLE[endPageIdx] = pleEntry.PLE[swap_idx];
+							pleEntry.Occupy[endPageIdx] = pleEntry.Occupy[swap_idx];
+
+							pleEntry.PLE[swap_idx]=endPageOffset;
+							pleEntry.Occupy[swap_idx] = 1;
+
+							hotTracker.HBMQueue.pop_back();
+							hotTracker.DRAMQueue.pop_front();
+							hotTracker.DRAMQueue.push_front(endPage);
+							hotTracker.HBMQueue.push_front(swap_page);
+						}
+					}
+					else
+					{
+						// 只能是mem模式 缓冲一下 mHBM => cHBM
+						// 状态位变化：ple,nc + 1,mHBM -1 
+						pleEntry.Type[endPageIdx] = 2;
+						pleEntry.Occupy[endPageIdx] = 1;
+						hotTracker._na = 0;
+						hotTracker._nn = 0;
+						hotTracker._nc = 0;
+
+						for(int i = 0;i<bumblebee_n;i++)
+						{
+							// mHBM被访问
+							if(pleEntry.Occupy[i]==1 && pleEntry.Type[i]==1)
+							{
+								hotTracker._na += 1;
+							}
+
+							// mHBM未被访问
+							if(pleEntry.Occupy[i]==0 && pleEntry.Type[i]==1)
+							{
+								hotTracker._nn += 1;
+							}
+
+							if(pleEntry.Type[i] == 2)
+							{
+								hotTracker._nc += 1;
+							}
+						}
+					}
+				}
+				// else {} 不驱逐，就什么也不用做
+			}
+		} 
+	}// else {} 不是僵尸页面
+}
 
 // uint64_t
 // MemoryController::get_segment(Address addr)
@@ -2734,13 +3033,15 @@ Address
 MemoryController::vaddr_to_paddr(MemReq req)
 {
 	Address vLineAddr = req.lineAddr;
-
+	
 	uint64_t page_offset = vLineAddr & (_hybrid2_page_size - 1);
 	uint64_t page_bits = std::log2(_hybrid2_page_size);
 	uint64_t vpgnum = vLineAddr >> page_bits;
 
+
 	uint64_t ppgnum = fixedMapping[vpgnum % num_pages];
 	Address pLineAddr = (ppgnum << page_bits) | page_offset;
+
 	// Add this code, then can run smoothly, but how to correct the logic
 	// pLineAddr += 1024 * 1024 * 1024;
 

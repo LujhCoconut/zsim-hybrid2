@@ -10,6 +10,12 @@ The 2.0.0 version of Zsim-Hybrid2 is released. Version 2.0.0 is an unstable rele
 1. Added the impact of asynchronous migration and eviction on system traffic and overhead, and fixed the "happens-before" issue introduced by asynchronous migration and eviction in the v1.0.x versions.
 2. Fixed some bugs where certain states in the XTA were not set.
 
+**IPC Test**
+The same as IPC Test with v1.0.1
+In the experimental testing of version v2.0.0, we used DDR-2400 as NM, HBM-2000 as FM, and Sys Frequency = 3400. Using deepsjeng from SPEC CPU2017 as the dataset, the experimental performance of hybrid-v1.0.1 was observed to be between that of pure DRAM and pure HBM.
+
+In this experiment, the performance of the Hybrid2-v2.0.0 version improved by 13.59% compared to the pure DRAM baseline.
+
 ## v1.0.1 (Tested Simple Version)
 The second version of Zsim-Hybrid2 is released. The project is implemented based on the open-source Banshee project. The following changes are made:
 1. Modified the logic of two remap tables, using page ids as keys and values.

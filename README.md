@@ -11,7 +11,9 @@ The 2.0.0 version of Zsim-Hybrid2 is released. Version 2.0.0 is an unstable rele
 2. Fixed some bugs where certain states in the XTA were not set.
 
 **IPC Test**
-The same as IPC Test with v1.0.1
+
+The same as IPC Test with v1.0.1.
+
 In the experimental testing of version v2.0.0, we used DDR-2400 as NM, HBM-2000 as FM, and Sys Frequency = 3400. Using deepsjeng from SPEC CPU2017 as the dataset, the experimental performance of hybrid-v2.0.1 was observed to be between that of pure DRAM and pure HBM.
 
 In this experiment, the performance of the Hybrid2-v2.0.0 version improved by 13.59% compared to the pure DRAM baseline.

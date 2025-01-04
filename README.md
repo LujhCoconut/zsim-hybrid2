@@ -1,9 +1,14 @@
-# Zsim-Hybrid2 [Current Version 1.0.1]
+# Zsim-Hybrid2 [Current Version 2.0.0]
 
 This project aims to reproduce the **HPCA'2020** paper `"Hybrid2: Combining Caching and Migration in Hybrid Memory Systems"` using ZSim. The project is implemented based on the open-source Banshee project. 
 
 The link to the open-source Banshee project is `https://github.com/yxymit/banshee`.
 
+
+## v2.0.0 (Current Version)
+The 2.0.0 version of Zsim-Hybrid2 is released. Version 2.0.0 is an unstable release with significant room for performance optimization. The specific changes in version 2.0.0 are as follows:
+1. Added the impact of asynchronous migration and eviction on system traffic and overhead, and fixed the "happens-before" issue introduced by asynchronous migration and eviction in the v1.0.x versions.
+2. Fixed some bugs where certain states in the XTA were not set.
 
 ## v1.0.1 (Current Version)
 The second version of Zsim-Hybrid2 is released. The project is implemented based on the open-source Banshee project. The following changes are made:

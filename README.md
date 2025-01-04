@@ -10,7 +10,7 @@ The 2.0.0 version of Zsim-Hybrid2 is released. Version 2.0.0 is an unstable rele
 1. Added the impact of asynchronous migration and eviction on system traffic and overhead, and fixed the "happens-before" issue introduced by asynchronous migration and eviction in the v1.0.x versions.
 2. Fixed some bugs where certain states in the XTA were not set.
 
-## v1.0.1 (Current Version)
+## v1.0.1 (Tested Simple Version)
 The second version of Zsim-Hybrid2 is released. The project is implemented based on the open-source Banshee project. The following changes are made:
 1. Modified the logic of two remap tables, using page ids as keys and values.
 2. The impact of traffic during the migration process is considered in this version, with `type == 2` requests used for load and store operations to represent migration and eviction.

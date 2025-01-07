@@ -9,7 +9,7 @@ The 2.0.1 version of Zsim-Hybrid2 is released. Version 2.0.1 is a more stable re
 1. Optimized the logic for the (`XTAMiss -> [address < mem_hbm_size]`) branch by introducing cache set occupancy to limit excessive eviction and migration operations.
 2. Corrected one of the trigger conditions for migration eviction by introducing `chbm_miss_cntr` to replace the comparison between `heater` and `net_cost`. The `chbm_miss_cntr` is reset every approximately 100K cycles.
 3. Fixed the bug where `_counter` was not being updated.
-4. 
+4. The issue with incorrect address interpretation has been fixed, where it was mistakenly assumed that req.lineAddr was the request address in bytes. This issue has been corrected in v2.0.1.
 
 **IPC Test**
 

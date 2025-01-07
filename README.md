@@ -1,11 +1,26 @@
-# Zsim-Hybrid2 [Current Version 2.0.0]
+# Zsim-Hybrid2 [Current Version 2.0.1]
 
 This project aims to reproduce the **HPCA'2020** paper `"Hybrid2: Combining Caching and Migration in Hybrid Memory Systems"` using ZSim. The project is implemented based on the open-source Banshee project. 
 
 The link to the open-source Banshee project is `https://github.com/yxymit/banshee`.
 
+## v2.0.1 (Current Version)
+The 2.0.1 version of Zsim-Hybrid2 is released. Version 2.0.1 is a more stable release. The specific changes in version 2.0.1 are as follows:
+1. Optimized the logic for the (`XTAMiss -> [address < mem_hbm_size]`) branch by introducing cache set occupancy to limit excessive eviction and migration operations.
+2. Corrected one of the trigger conditions for migration eviction by introducing `chbm_miss_cntr` to replace the comparison between `heater` and `net_cost`. The `chbm_miss_cntr` is reset every approximately 100K cycles.
+3. Fixed the bug where `_counter` was not being updated.
+4. 
 
-## v2.0.0 (Current Version)
+**IPC Test**
+
+The same as IPC Test with v1.0.1.
+
+In the experimental testing of version v2.0.1, we used DDR-2400 as NM, HBM-2000 as FM, and Sys Frequency = 3400. Using deepsjeng from SPEC CPU2017 as the dataset, the experimental performance of hybrid-v2.0.1 was observed to be between that of pure DRAM and pure HBM.
+
+In this experiment, the performance of the Hybrid2-v2.0.1 version improved by **32.71%** compared to the pure DRAM baseline.
+
+
+## v2.0.0 (Current Version) commit(4115d0b)
 The 2.0.0 version of Zsim-Hybrid2 is released. Version 2.0.0 is an unstable release with significant room for performance optimization. The specific changes in version 2.0.0 are as follows:
 1. Added the impact of asynchronous migration and eviction on system traffic and overhead, and fixed the "happens-before" issue introduced by asynchronous migration and eviction in the v1.0.x versions.
 2. Fixed some bugs where certain states in the XTA were not set.
@@ -14,11 +29,11 @@ The 2.0.0 version of Zsim-Hybrid2 is released. Version 2.0.0 is an unstable rele
 
 The same as IPC Test with v1.0.1.
 
-In the experimental testing of version v2.0.0, we used DDR-2400 as NM, HBM-2000 as FM, and Sys Frequency = 3400. Using deepsjeng from SPEC CPU2017 as the dataset, the experimental performance of hybrid-v2.0.1 was observed to be between that of pure DRAM and pure HBM.
+In the experimental testing of version v2.0.0, we used DDR-2400 as NM, HBM-2000 as FM, and Sys Frequency = 3400. Using deepsjeng from SPEC CPU2017 as the dataset, the experimental performance of hybrid-v2.0.0 was observed to be between that of pure DRAM and pure HBM.
 
 In this experiment, the performance of the Hybrid2-v2.0.0 version improved by 13.59% compared to the pure DRAM baseline.
 
-## v1.0.1 (Tested Simple Version)
+## v1.0.1 (Tested Simple Version) commit(bc61a83)
 The second version of Zsim-Hybrid2 is released. The project is implemented based on the open-source Banshee project. The following changes are made:
 1. Modified the logic of two remap tables, using page ids as keys and values.
 2. The impact of traffic during the migration process is considered in this version, with `type == 2` requests used for load and store operations to represent migration and eviction.
@@ -60,7 +75,7 @@ In the experimental testing of version v1.0.1, we used DDR-2400 as NM, HBM-2000 
 ```
 In this experiment, the performance of the Hybrid2-v1.0.1 version improved by 13.38% compared to the pure DRAM baseline. However, it showed a 44.48% performance decrease compared to the pure HBM baseline. This indicates that there is room for optimization in the v1.0.1 code.
 
-## v1.0.0
+## v1.0.0 (Tested Simple Version) commit(ec52b6e)
 The first version of Zsim-Hybrid2 is released. The project is implemented based on the open-source Banshee project.
 
 ## How to build Zsim-Hybrid2
@@ -87,7 +102,7 @@ scons -j<You Want>
 
 6. run
 ```shell
-build/opt/zsim tests/<condfig_you_want.cfg>
+build/opt/zsim tests/<config_you_want.cfg>
 ```
 
 

@@ -215,6 +215,7 @@ public:
 	g_vector<XTAEntry>& find_XTA_set(uint64_t set_id);
 	uint64_t ret_lru_page(g_vector<XTAEntry> SETEntries);
 	int check_set_full(g_vector<XTAEntry> SETEntries);
+	int check_set_occupy(g_vector<XTAEntry> SETEntries);
 	Address vaddr_to_paddr(MemReq req);
 	Address paddr_to_vaddr(Address pLineAddr);
 	Address handle_low_address(Address addr);

@@ -4,6 +4,12 @@ This project aims to reproduce the **HPCA'2020** paper `"Hybrid2: Combining Cach
 
 The link to the open-source Banshee project is `https://github.com/yxymit/banshee`.
 
+## Tested Config
+|CPU Cores|L1 iCache|L1 dCache|L2 Cache|L3 Cache|Benchmarks|
+|-|-|-|-|-|-|
+|4 OOO-Cores|32KB Per Core|32KB Per Core|128 KB Total|4MB Total , 27ns Latency|SPEC2017,Parsec,GAPBS,NPB|
+
+
 ## v2.0.1 (Current Version)
 The 2.0.1 version of Zsim-Hybrid2 is released. Version 2.0.1 is a more stable release. The specific changes in version 2.0.1 are as follows:
 1. Optimized the logic for the (`XTAMiss -> [address < mem_hbm_size]`) branch by introducing cache set occupancy to limit excessive eviction and migration operations.

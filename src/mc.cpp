@@ -42,8 +42,7 @@ MemoryController::MemoryController(g_string &name, uint32_t frequency, uint32_t 
 	}
 	// 默认为false，cfg文件里也都未指定
 	_sram_tag = config.get<bool>("sys.mem.sram_tag", false);
-	// _llc_latency = config.get<uint32_t>("sys.caches.l3.latency");
-	_llc_latency = 4; // when l2 is llc
+	_llc_latency = config.get<uint32_t>("sys.caches.l3.latency",4); // llc-latency = 4ns without l3
 	double timing_scale = config.get<double>("sys.mem.dram_timing_scale", 1);
 	g_string scheme = config.get<const char *>("sys.mem.cache_scheme", "NoCache");
 	_ext_type = config.get<const char *>("sys.mem.ext_dram.type", "Simple");
@@ -63,8 +62,6 @@ MemoryController::MemoryController(g_string &name, uint32_t frequency, uint32_t 
 	else if (scheme == "CacheMode")
 	{
 		_scheme = CacheMode;
-		// assert(_granularity == 64);
-		// assert(_num_ways == 1);
 	}
 	
 	else if (scheme == "UnisonCache")
@@ -96,13 +93,9 @@ MemoryController::MemoryController(g_string &name, uint32_t frequency, uint32_t 
 		_footprint_size = config.get<uint32_t>("sys.mem.mcdram.footprint_size");
 	}
 	else if (scheme == "Hybrid2")
-	{ // 【newAddition】新增hybird2模式接口
+	{ 
 		_scheme = Hybrid2;
 	}
-	// else if (scheme == "Chameleon")
-	// {
-	// 	_scheme = Chameleon;
-	// }
 	else if(scheme == "Bumblebee")
 	{
 		_scheme = Bumblebee;
@@ -1252,8 +1245,19 @@ MemoryController::access(MemReq &req)
 	return data_ready_cycle; // req.cycle + latency;
 }
 
-// v2.0.3
-// `Asyn Store` can switch to DMA , (HeMem SOSP'21)
+/**
+ * @brief HPCA'2020 Hybrid2 Memory Controller
+ * @cite  @INPROCEEDINGS{9065506,
+			author={Vasilakis, Evangelos and Papaefstathiou, Vassilis and Trancoso, Pedro and Sourdis, Ioannis},
+			booktitle={2020 IEEE International Symposium on High Performance Computer Architecture (HPCA)}, 
+			title={Hybrid2: Combining Caching and Migration in Hybrid Memory Systems}, 
+			year={2020},
+			volume={},
+			number={},
+			pages={649-662},
+			keywords={Random access memory;Bandwidth;Frequency modulation;Metadata;Three-dimensional displays;System-on-chip;Hardware;DRAM Cache;Data Migration;Hybrid Memory System;3D stacked DRAM;Memory},
+			doi={10.1109/HPCA47549.2020.00059}}
+ */
 uint64_t
 MemoryController::hybrid2_access(MemReq &req)
 {
@@ -1316,8 +1320,9 @@ MemoryController::hybrid2_access(MemReq &req)
 	uint64_t avg_temp = 0;
 	uint64_t low_temp = 100000;
 
-	// uint64_t look_up_XTA_lantency = 0; // SRAM LLC Latency or HBM Latency;
+	uint64_t look_up_XTA_lantency = _llc_latency; // SRAM LLC Latency or HBM Latency;
 	uint64_t total_latency = 0;
+	total_latency += look_up_XTA_lantency;
 	// 在SETEntries里找，看看能不能找到那个page,找到了就是XTAHit，否则就是XTAMiss
 	// 找的逻辑是根据地址去找，匹配_hybrid2_tag
 	for (uint64_t i = 0; i < set_assoc_num; i++)
@@ -1979,9 +1984,19 @@ MemoryController::hybrid2_access(MemReq &req)
 	return 0;
 }
 
-// v3.0.0
-// 1）优化了逻辑结构
-// 2）主要的性能问题在contention导致的流水线stall ; 竞争的原因是什么？
+/**
+ * @brief DAC'23 Bumblebee Memory Controller
+ * @cite  @INPROCEEDINGS{10248000,
+			author={Hua, Yifan and Zheng, Shengan and Yin, Ji and Chen, Weidong and Huang, Linpeng},
+			booktitle={2023 60th ACM/IEEE Design Automation Conference (DAC)}, 
+			title={Bumblebee: A MemCache Design for Die-stacked and Off-chip Heterogeneous Memory Systems}, 
+			year={2023},
+			volume={},
+			number={},
+			pages={1-6},
+			keywords={Energy consumption;Design automation;Costs;Memory management;Memory architecture;Random access memory;Switches;Heterogeneous memory;Die-stacked high-bandwidth memory;Caching and migration},
+			doi={10.1109/DAC56929.2023.10248000}}
+ */
 uint64_t
 MemoryController::bumblebee_access(MemReq& req)
 {
@@ -2030,7 +2045,6 @@ MemoryController::bumblebee_access(MemReq& req)
 		page_offset =  bumblebee_n + (address  - _mem_hbm_size) /  _bumblebee_page_size % bumblebee_m;
 		blk_offset = address  % _bumblebee_page_size % _bumblebee_blk_size;
 	}
-	
 	assert(99999 != set_id);
 	assert(-1 != page_offset);
 
@@ -2044,7 +2058,6 @@ MemoryController::bumblebee_access(MemReq& req)
 		// std::cout << "current alloc pages = " << current_alloc_pages << " rvalue = " << 0.5 * (bumblebee_m+bumblebee_n) << std::endl;
 		trySwap(pleEntry,hotTracker,MetaGrp[set_id],current_cycle,set_id,req);
 	}
-	
 	hotTrackerDecrease(hotTracker,current_cycle);
 	bool is_pop = shouldPop(hotTracker);
 	int pop_pg_id = -1; 
@@ -2064,21 +2077,21 @@ MemoryController::bumblebee_access(MemReq& req)
 		}
 
 	}
-
+	
 	// ----------------------->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 
 
 	// 记录bleEntries索引信息
-	// int ble_idx = -1;
-	BLEEntry bleEntry;
-	// 立即更新BLE状态
+	int ble_idx = -1;
 	for(int i = 0;i<bumblebee_m+bumblebee_n;i++)
 	{
 		if(bleEntries[i].ple_idx == page_offset)
 		{
-			bleEntry = bleEntries[i];
+			ble_idx = i;
 			break;
 		}
 	}
+	BLEEntry bleEntry = bleEntries[ble_idx];
+
 	bleEntry.cntr += 1;
 	bleEntry.cntr -= (int)(current_cycle - bleEntry.l_cycle)/long_time;
 	if(bleEntry.cntr <= 0) bleEntry.cntr = 0;
@@ -2141,7 +2154,6 @@ MemoryController::bumblebee_access(MemReq& req)
 			}
 		}
 	}
-
 
 	// <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<----------------------- 
 
@@ -2302,12 +2314,22 @@ MemoryController::bumblebee_access(MemReq& req)
 				// bool should_find_ddr = false;
 				
 
-				if(is_pop) // 只有我可能pop出去，我才有可能直接写在HBM里，否则直接分配DDR
+				if(is_pop) // 只有我可能pop出去(可以先pop对应cacheline)，我才有可能直接写在HBM里，否则直接分配DDR
 				{
 					// is_pop 代表了两种可能性
 					// case 1: 原来的HBMType是Memory模式就切换为Cache模式，此时依然分配在DDR上
 					// case 2: HBMType是Cache模式，此时需要写回valid数据（为什么不是脏数据呢？因为如果首次分配即在此处，LOAD的数据也是需要处理的）；那如果不是首次，大约的确是需要写回脏数据的；这个在实现上需要增加什么样的数据结构，待考虑；
 
+					// alloc & access
+
+					// check cacheline
+					Address access_address = set_id * bumblebee_n * _bumblebee_page_size + pop_pg_idx*_bumblebee_page_size + blk_offset*_bumblebee_blk_size;
+					Address ld_hbm_address = (access_address / 64 / _mem_hbm_per_mc * 64) | (access_address % 64);
+					uint32_t mem_hbm_select = (access_address / 64)  % _mem_hbm_per_mc;
+					req.lineAddr = ld_hbm_address;
+					req.cycle = _mcdram[mem_hbm_select]->access(req,0,4);
+					req.lineAddr = tmpAddr;
+					
 					if(pleEntry.Type[pop_pg_idx]==2) // case 2
 					{
 						// load
@@ -2319,16 +2341,16 @@ MemoryController::bumblebee_access(MemReq& req)
 								Address ld_hbm_address =  (ld_address / 64 /_mem_hbm_per_mc * 64 ) | (ld_address % 64);
 								uint32_t mem_hbm_select = (ld_address / 64)  % _mem_hbm_per_mc;
 								MemReq load_req = {ld_hbm_address, GETS, req.childId,&state,req.cycle, req.childLock, req.initialState, req.srcId, req.flags};;		
-								req.cycle = _mcdram[mem_hbm_select]->access(load_req,0,4);
+								_mcdram[mem_hbm_select]->access(load_req,2,4);
 							}
 						}
-						// alloc & access
-						Address access_address = set_id * bumblebee_n * _bumblebee_page_size + pop_pg_idx*_bumblebee_page_size + blk_offset*_bumblebee_blk_size;
-						Address ld_hbm_address = (access_address / 64 / _mem_hbm_per_mc * 64) | (access_address % 64);
-						uint32_t mem_hbm_select = (access_address / 64)  % _mem_hbm_per_mc;
-						req.lineAddr = ld_hbm_address;
-						req.cycle = _mcdram[mem_hbm_select]->access(req,0,4);
-						req.lineAddr = tmpAddr;
+						// // alloc & access
+						// Address access_address = set_id * bumblebee_n * _bumblebee_page_size + pop_pg_idx*_bumblebee_page_size + blk_offset*_bumblebee_blk_size;
+						// Address ld_hbm_address = (access_address / 64 / _mem_hbm_per_mc * 64) | (access_address % 64);
+						// uint32_t mem_hbm_select = (access_address / 64)  % _mem_hbm_per_mc;
+						// req.lineAddr = ld_hbm_address;
+						// req.cycle = _mcdram[mem_hbm_select]->access(req,0,4);
+						// req.lineAddr = tmpAddr;
 						
 						pleEntry.PLE[pop_pg_idx] = page_offset;
 						pleEntry.Occupy[pop_pg_idx] = 1;
@@ -2833,7 +2855,6 @@ MemoryController::trySwap(PLEEntry& pleEntry,HotnenssTracker& hotTracker,MetaGrp
 int
 MemoryController::ret_set_alloc_state(MetaGrpEntry& set)
 {
-
 	set.set_alloc_page = 0;
 	for(int i = 0; i< bumblebee_n+bumblebee_m;i++)
 	{
@@ -3434,129 +3455,6 @@ MemoryController::tryEvict(PLEEntry& pleEntry,HotnenssTracker& hotTracker,uint64
  */
 
 
-// uint64_t
-// MemoryController::get_segment(Address addr)
-// {
-// 	return addr % _mem_hbm_size / _chameleon_blk_size;
-// }
-
-// int
-// MemoryController::get_segment_num(Address addr)
-// {
-// 	return addr / _mem_hbm_size;
-// }
-
-/**
- * Only for test !
- */
-uint64_t
-MemoryController::random_hybrid2_access(MemReq req)
-{
-	// futex_lock(&_lock);
-	switch (req.type)
-	{
-	case PUTS:
-	case PUTX:
-		*req.state = I;
-		break;
-	case GETS:
-		*req.state = req.is(MemReq::NOEXCL) ? S : E;
-		break;
-	case GETX:
-		*req.state = M;
-		break;
-	default:
-		panic("!?");
-	}
-	// 干净数据，不会改变块的状态
-	if (req.type == PUTS)
-	{
-		return req.cycle;
-	}
-	// futex_unlock(&_lock); 这里的执行已经持有了这把锁，由于在access中直接返回
-	// 在本回合（快要）结束（的某个时机），需要释放这把锁
-
-	// 请求状态
-	// ReqType type = (req.type == GETS || req.type == GETX)? LOAD : STORE;
-	// 表示的地址
-	Address address = req.lineAddr;
-	// HBM在这里需要自己考虑分到哪一个通道，但是ZSim不太涉及请求排队
-
-	// uint32_t cache_hbm_select = (address / 64) % _cache_hbm_per_mc;
-	// Address cache_hbm_address = (address / 64 /_cache_hbm_per_mc * 64) | (address % 64);
-	assert(0 != _cache_hbm_per_mc);
-	uint32_t mem_hbm_select = (address / 64) % _cache_hbm_per_mc;
-	// assert(4 > mem_hbm_select);
-	Address mem_hbm_address = (address / 64 / _cache_hbm_per_mc * 64) | (address % 64);
-
-	// 创建一个随机数生成器
-	std::random_device rd;						 // 用于生成种子
-	std::mt19937 gen(rd());						 // 使用梅森旋转算法生成随机数
-	std::uniform_int_distribution<> dis(1, 100); // 生成范围为[1, 100]的均匀分布
-
-	// 生成一个随机整数
-	int random_num = dis(gen); 
-
-	if (random_num % 2 == 0)
-	{
-		// std::cout << " _ext_dram.req.cycle " << _ext_dram->access(req,0,4) << std::endl;
-		req.cycle = _ext_dram->access(req, 0, 4);
-		// futex_unlock(&_lock);
-		return req.cycle;
-	}
-	else
-	{
-
-		Address tmp = req.lineAddr;
-		req.lineAddr = mem_hbm_address;
-
-		req.cycle = _mcdram[mem_hbm_select]->access(req, 0, 4);
-
-		req.lineAddr = tmp;
-
-		return req.cycle;
-		// req.cycle = _ext_dram->access(req,0,4);
-		// futex_unlock(&_lock);
-		// return req.cycle;
-	}
-}
-
-/**
- * Only for test !
- */
-uint64_t
-MemoryController::hbm_hybrid2_access(MemReq req)
-{
-	// futex_lock(&_lock);
-	// switch (req.type) {
-	//     case PUTS:
-	//     case PUTX:
-	//         *req.state = I;
-	//         break;
-	//     case GETS:
-	//         *req.state = req.is(MemReq::NOEXCL)? S : E;
-	//         break;
-	//     case GETX:
-	//         *req.state = M;
-	//         break;
-	//     default: panic("!?");
-	// }
-	// // 干净数据，不会改变块的状态
-	// if (req.type == PUTS){
-	// 	return req.cycle;
-	// }
-
-	Address address = req.lineAddr;
-	uint32_t mcdram_select = (address / 64) % _mcdram_per_mc;
-	Address mc_address = (address / 64 / _mcdram_per_mc * 64) | (address % 64);
-
-	req.lineAddr = mc_address;
-	req.cycle = _mcdram[mcdram_select]->access(req, 0, 4);
-	// req.cycle = _memhbm[mcdram_select]->access(req, 0, 4);
-	req.lineAddr = address;
-	return req.cycle;
-}
-
 // 这段代码写的分类，实际上没这个必要，但是为了以后有可能改assoc，预留了分类
 uint64_t
 MemoryController::get_set_id(uint64_t addr)
@@ -3641,7 +3539,7 @@ MemoryController::check_set_occupy(g_vector<XTAEntry> SETEntries)
 Address
 MemoryController::vaddr_to_paddr(MemReq req)
 {
-	Address vLineAddr = req.lineAddr;
+	Address vLineAddr = req.lineAddr * 64;
 	
 	uint64_t page_offset = vLineAddr & (_hybrid2_page_size - 1);
 	uint64_t page_bits = std::log2(_hybrid2_page_size);
@@ -3650,7 +3548,7 @@ MemoryController::vaddr_to_paddr(MemReq req)
 	uint64_t ppgnum = fixedMapping[vpgnum % num_pages];
 	Address pLineAddr = (ppgnum << page_bits) | page_offset;
 
-	return pLineAddr*64;
+	return pLineAddr;
 };
 
 Address

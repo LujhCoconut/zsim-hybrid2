@@ -31,7 +31,8 @@ enum Scheme
    Hybrid2,
    Chameleon,
    Bumblebee,
-   CacheMode
+   CacheMode,
+   DirectFlat
 };
 
 class Way
@@ -318,12 +319,19 @@ public:
 
 	// ----------------------------------------------------------
 	// Bumblebee[DAC'23] Reproduce
-	const static int bumblebee_m = 128; // 取消const static时 请将下面结构体的构造函数取消，并在cpp中初始化
-	const static int bumblebee_n = 16; // paper n
+
+	// notes:
+	// m和n的值的设计是比较讲究的，首先隐含的等式是m/n=DDRSize/HBMSize
+	// 在此基础上m,n值越大，对于Footprint足够小的应用，可以减少同set HBM竞争
+	// 从而将访存操作更多位于HBM上
+	// 代价是：模拟器执行时间显著增加（涉及到多次O(m+n)复杂度的操作）；
+	const static int bumblebee_m = 128*2; // 取消const static时 请将下面结构体的构造函数取消，并在cpp中初始化
+	const static int bumblebee_n = 16*2; // paper n
+	int rh_upper = 30; //Rh较高的超参数
 	int bumblebee_T; // paper T
 	uint32_t _bumblebee_page_size;
 	uint32_t _bumblebee_blk_size;
-	const static int hot_data = 10;
+	const static int hot_data = 32;
 
 	const static int blk_per_page = 64;
 
@@ -350,6 +358,8 @@ public:
 		}
 	};
 
+	
+
 	// BLE 数组会追踪 cHBM 和 mHBM 页面中已被访问的块
 	// 如果页面中的大多数块已被预取到 cHBM，表明该页面具有强空间局部性，应该被切换为 mHBM 页面。
 	// 如果大多数 HBM 页面表现出强空间局部性，则应将更多的片外页面迁移到 mHBM。
@@ -373,9 +383,10 @@ public:
 	struct MetaGrpEntry{
 		g_vector<BLEEntry> _bleEntries; // 需要被初始化
 		PLEEntry _pleEntry;
+		int set_alloc_page;
 		// ......
 
-		MetaGrpEntry()
+		MetaGrpEntry(int alloc_pg = 0):set_alloc_page(alloc_pg)
 		{
 			for(int i = 0;i < bumblebee_m + bumblebee_n;i++)
 			{
@@ -387,6 +398,7 @@ public:
 	};
 
 	g_vector<MetaGrpEntry> MetaGrp;
+	int ret_set_alloc_state(MetaGrpEntry& set);
 
 
 	struct QueuePage{
@@ -403,9 +415,8 @@ public:
 	// SL>0（强空间局部性），应将更多的热点数据迁移到 mHBM，以更好地利用空间局部性并充分利用内存带宽
 	// SL≤0（弱空间局部性），应将热点数据缓存到 cHBM，以减少过度预取的情况。
 
-	int rh_upper = 12; //Rh较高的超参数
-	uint64_t long_time = 100000; // 长时间的超参数
 
+	uint64_t long_time = 2000000; // 长时间的超参数
 
 
 	// 时间局部性
@@ -417,12 +428,13 @@ public:
 		int _nc; // number of cHBM Pages
 		int _na; // mHBM accessed
 		int _nn; // mHBM not accessed
+		uint64_t _last_mod_cycle;
 		// LRU Hot Table Queue
 		g_list<QueuePage> HBMQueue; 
 		g_list<QueuePage> DRAMQueue;
 
-		HotnenssTracker(int rh = 0, int nc = 0, int na=0, int nn=0):
-			_rh(rh),_nc(nc),_na(na),_nn(nn)
+		HotnenssTracker(int rh = 0, int nc = bumblebee_n, int na=0, int nn= 0, uint64_t lcycle = 0):
+			_rh(rh),_nc(nc),_na(na),_nn(nn),_last_mod_cycle(lcycle)
 		{
 
 		}
@@ -432,7 +444,17 @@ public:
 	g_vector<HotnenssTracker> HotnessTable;
 	Address getDestAddress(uint64_t set_id,int idx,int page_offset,int blk_offset);
 	void tryEvict(PLEEntry& pleEntry,HotnenssTracker& hotTracker,uint64_t current_cycle,g_vector<BLEEntry>& bleEntries,uint64_t set_id,MemReq& req);
+	void tryEvict_2(PLEEntry& pleEntry,HotnenssTracker& hotTracker,uint64_t current_cycle,g_vector<BLEEntry>& bleEntries,uint64_t set_id,MemReq& req);
+	void hotTrackerDecrease(HotnenssTracker& hotTracker,uint64_t current_cycle);
 
+	std::pair<int,uint64_t> find_coldest(HotnenssTracker& hotTracker);
+	std::pair<int,uint64_t> find_hottest(HotnenssTracker& hotTracker);
+	// int find_coldest(HotnenssTracker& hotTracker);
+	// int find_hottest(HotnenssTracker& hotTracker);
+	int ret_hbm_occupy(MetaGrpEntry& set);
+	void trySwap(PLEEntry& pleEntry,HotnenssTracker& hotTracker,MetaGrpEntry& set,uint64_t current_cycle,uint64_t set_id,MemReq& req);
+
+	bool shouldPop(HotnenssTracker& hotTracker);
 	// 缓存异步执行的迁移的队列
 	struct AsynReq{ //未设计初始化函数，使用此数据结构请务必正确初始化
 		MemReq _asynReq;
@@ -442,8 +464,8 @@ public:
 	};
 
 	g_list<AsynReq> AsynReqQueue; // 尾部加入push_back 头部弹出pop_front
-	void execAsynReq(); // 每次Access完都会清空AsynReqQueue,解决了hanppens-before的问题
-	lock_t _AsynQueuelock; // 只有一个线程可以修改AsynReqQueue
+	void execAsynReq(); // 每次Access完都会清空AsynReqQueue,解决了happens-before的问题
+	lock_t _AsynQueuelock; // 只有一个线程可以修改AsynReqQueue(多生产者多消费者模型)
 
 	void hotTrackerState(HotnenssTracker& hotTracker,PLEEntry& pleEntry);
 
@@ -535,6 +557,7 @@ public:
 	uint64_t chameleon_access(MemReq& req);
 	uint64_t bumblebee_access(MemReq& req);
 	uint64_t hybrid2_access(MemReq& req);
+	uint64_t direct_flat_access(MemReq& req);
 	uint64_t access(MemReq& req);
 	const char * getName() { return _name.c_str(); };
 	void initStats(AggregateStat* parentStat); 

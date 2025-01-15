@@ -1,4 +1,4 @@
-# Zsim-Hybrid2 [Current Version 2.0.1]
+# Zsim-Hybrid2 [Current Version 3.0.0]
 
 This project aims to reproduce the **HPCA'2020** paper `"Hybrid2: Combining Caching and Migration in Hybrid Memory Systems"` using ZSim. The project is implemented based on the open-source Banshee project. 
 
@@ -9,8 +9,14 @@ The link to the open-source Banshee project is `https://github.com/yxymit/banshe
 |-|-|-|-|-|-|
 |4 OOO-Cores|32KB Per Core|32KB Per Core|128 KB Total|4MB Total , 27ns Latency|SPEC2017,Parsec,GAPBS,NPB|
 
+## v3.0.0
+The 3.0.0 version of Zsim-Hybrid2 is released. Version 3.0.0 is a more stable release. The specific changes in version 3.0.0 are as follows:
+1. Corrected the incorrect channel allocation logic.
+2. Multiplied the cacheline address by 64 in the virtual-to-physical address translation (`vaddr_to_paddr()`) to restore the byte address.
+3. Optimized the code execution structure and corrected some logical errors.
 
-## v2.0.1 (Current Version)
+
+## v2.0.1 
 The 2.0.1 version of Zsim-Hybrid2 is released. Version 2.0.1 is a more stable release. The specific changes in version 2.0.1 are as follows:
 1. Optimized the logic for the (`XTAMiss -> [address < mem_hbm_size]`) branch by introducing cache set occupancy to limit excessive eviction and migration operations.
 2. Corrected one of the trigger conditions for migration eviction by introducing `chbm_miss_cntr` to replace the comparison between `heater` and `net_cost`. The `chbm_miss_cntr` is reset every approximately 100K cycles.
@@ -26,7 +32,7 @@ In the experimental testing of version v2.0.1, we used DDR-2400 as NM, HBM-2000 
 In this experiment, the performance of the Hybrid2-v2.0.1 version improved by **32.71%** compared to the pure DRAM baseline.
 
 
-## v2.0.0 (Current Version) commit(4115d0b)
+## v2.0.0  commit(4115d0b)
 The 2.0.0 version of Zsim-Hybrid2 is released. Version 2.0.0 is an unstable release with significant room for performance optimization. The specific changes in version 2.0.0 are as follows:
 1. Added the impact of asynchronous migration and eviction on system traffic and overhead, and fixed the "happens-before" issue introduced by asynchronous migration and eviction in the v1.0.x versions.
 2. Fixed some bugs where certain states in the XTA were not set.

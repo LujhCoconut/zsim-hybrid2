@@ -140,6 +140,7 @@ public:
 	// ----------------------------------------------------------
 	//Hybrid2[HPCA'20] Reproduce
 	// DDRMemory * test_mem;
+	// uint64_t tag_probe_latency;
 
 	MemObject ** _cachehbm;
 	uint32_t _cache_hbm_per_mc;

@@ -11,7 +11,7 @@ The link to the open-source Banshee project is `https://github.com/yxymit/banshe
 
 ## v3.0.1
 The 3.0.1 version of Zsim-Hybrid2 is released. Version 3.0.1 is a more stable release. The specific changes in version 3.0.1 are as follows:
-1. The overhead of modifying metadata has been considered in the current version. In this version, metadata does not account for metadata contention (including the impact of consistency, bandwidth contention, and other details). We have set relatively reasonable static parameters to quantify the overhead delay, and the calculation formula is as follows: `(tCL+tRCD+tRP+tRAS+1)**sysFreqKHz/memFerKHz/2`. This parameter can also be set according to the return value of _mcdram->access(req, 0, 2).
+1. The overhead of modifying metadata has been considered in the current version. In this version, metadata does not account for metadata contention (including the impact of consistency, bandwidth contention, and other details). We have set relatively reasonable static parameters to quantify the overhead delay, and the calculation formula is as follows: `(tCL+tRCD+tRP+tRAS+1)*sysFreqKHz/memFerKHz/2`. This parameter can also be set according to the return value of _mcdram->access(req, 0, 2).
 2. Continued optimizing the code for migrating and evicting data, exploring the parallelism between migration, eviction, and access, and optimizing the execution order and structure of the code accordingly.
 
 **IPC Test**

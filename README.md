@@ -9,6 +9,10 @@ The link to the open-source Banshee project is `https://github.com/yxymit/banshe
 |-|-|-|-|-|-|
 |4 OOO-Cores|32KB Per Core|32KB Per Core|128 KB Total|4MB Total , 27ns Latency|SPEC2017,Parsec,GAPBS,NPB|
 
+## v3.0.2
+The 3.0.2 version of Zsim-Hybrid2 is released. Version 3.0.2 is a more stable release. The specific changes in version 3.0.2 are as follows:
+1. The overhead of metadata migration was measured. In the HBM access latency test, the read latency was 23ns (MemToSysCycle), and the write latency was 91ns. Based on the burst length of the metadata, the corresponding read XTA latency was 12ns, and the XTA write latency was 46ns. Since reading the XTA is located in the critical path of each access, and each memory access triggers metadata modification, the minimum metadata overhead for a single access is 58ns.
+
 ## v3.0.1
 The 3.0.1 version of Zsim-Hybrid2 is released. Version 3.0.1 is a more stable release. The specific changes in version 3.0.1 are as follows:
 1. The overhead of modifying metadata has been considered in the current version. In this version, metadata does not account for metadata contention (including the impact of consistency, bandwidth contention, and other details). We have set relatively reasonable static parameters to quantify the overhead delay, and the calculation formula is as follows: `(tCL+tRCD+tRP+tRAS+1)*sysFreqKHz/memFerKHz/2`. This parameter can also be set according to the return value of _mcdram->access(req, 0, 2).

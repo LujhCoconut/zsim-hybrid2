@@ -1310,9 +1310,13 @@ MemoryController::hybrid2_access(MemReq &req)
 	uint64_t avg_temp = 0;
 	uint64_t low_temp = 100000;
 
-	uint64_t look_up_XTA_lantency = (18+12+14+28+1)*3400/1000/2; // (tCL + tRCD + tRP + tRAS + 1)*sysFreqKHz/memFerKHz/2
+	// uint64_t look_up_XTA_lantency = (18+12+14+28+1)*3400/1000/2; // (tCL + tRCD + tRP + tRAS + 1)*sysFreqKHz/memFerKHz/2
+	uint64_t look_up_XTA_rd_latency = 12; // mcdram->access(read_req,0,4) = 23ns (HBM-1000 Timing Parameters)
+	uint64_t look_up_XTA_wt_latency = 46; // mcdram->access(read_req,0,4) = 91ns (HBM-1000 Timing Parameters)
+
 	uint64_t total_latency = 0;
-	total_latency += look_up_XTA_lantency;
+	total_latency += (look_up_XTA_rd_latency + look_up_XTA_wt_latency); // must read , each req will (over)write XTA at least once
+
 	// 在SETEntries里找，看看能不能找到那个page,找到了就是XTAHit，否则就是XTAMiss
 	// 找的逻辑是根据地址去找，匹配_hybrid2_tag
 	for (uint64_t i = 0; i < set_assoc_num; i++)
@@ -1986,7 +1990,7 @@ MemoryController::hybrid2_access(MemReq &req)
 			pages={1-6},
 			keywords={Energy consumption;Design automation;Costs;Memory management;Memory architecture;Random access memory;Switches;Heterogeneous memory;Die-stacked high-bandwidth memory;Caching and migration},
 			doi={10.1109/DAC56929.2023.10248000}}
- * @attention fixed bug < 1. error order setting with trySwap> < 2. error code order with[PRT-MISS -> NO-HBM -> ADDR Belongs to HBM]> 
+ * @attention fixed bug <error order setting with > 
  */
 uint64_t
 MemoryController::bumblebee_access(MemReq& req)
@@ -2065,6 +2069,8 @@ MemoryController::bumblebee_access(MemReq& req)
 
 	}
 	
+	// ----------------------->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 
+
 	// 记录bleEntries索引信息
 	int ble_idx = -1;
 	for(int i = 0;i<bumblebee_m+bumblebee_n;i++)
@@ -2096,10 +2102,10 @@ MemoryController::bumblebee_access(MemReq& req)
 		}
 	}
 
-	// SL相关性能调参区域----------------------->>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 
+
 	int SL = hotTracker._na - hotTracker._nn - hotTracker._nc;
 
-	if(hotTracker._nn <= bumblebee_n - rh_upper) // 判断条件 ？？？
+	if(hotTracker._nn <= bumblebee_n - rh_upper)
 	{
 		if(SL > 0)
 		{
@@ -2306,18 +2312,18 @@ MemoryController::bumblebee_access(MemReq& req)
 					// case 1: 原来的HBMType是Memory模式就切换为Cache模式，此时依然分配在DDR上
 					// case 2: HBMType是Cache模式，此时需要写回valid数据（为什么不是脏数据呢？因为如果首次分配即在此处，LOAD的数据也是需要处理的）；那如果不是首次，大约的确是需要写回脏数据的；这个在实现上需要增加什么样的数据结构，待考虑；
 
+					// alloc & access
+
+					// check cacheline
+					Address access_address = set_id * bumblebee_n * _bumblebee_page_size + pop_pg_idx*_bumblebee_page_size + blk_offset*_bumblebee_blk_size;
+					Address ld_hbm_address = (access_address / 64 / _mem_hbm_per_mc * 64) | (access_address % 64);
+					uint32_t mem_hbm_select = (access_address / 64)  % _mem_hbm_per_mc;
+					req.lineAddr = ld_hbm_address;
+					req.cycle = _mcdram[mem_hbm_select]->access(req,0,4);
+					req.lineAddr = tmpAddr;
+					
 					if(pleEntry.Type[pop_pg_idx]==2) // case 2
 					{
-						
-						// alloc & access
-						// check cacheline
-						Address access_address = set_id * bumblebee_n * _bumblebee_page_size + pop_pg_idx*_bumblebee_page_size + blk_offset*_bumblebee_blk_size;
-						Address ld_hbm_address = (access_address / 64 / _mem_hbm_per_mc * 64) | (access_address % 64);
-						uint32_t mem_hbm_select = (access_address / 64)  % _mem_hbm_per_mc;
-						req.lineAddr = ld_hbm_address;
-						req.cycle = _mcdram[mem_hbm_select]->access(req,0,4);
-						req.lineAddr = tmpAddr;
-
 						// load
 						for(int i = 0; i < blk_per_page ; i++)
 						{
@@ -2330,6 +2336,13 @@ MemoryController::bumblebee_access(MemReq& req)
 								_mcdram[mem_hbm_select]->access(load_req,2,4);
 							}
 						}
+						// // alloc & access
+						// Address access_address = set_id * bumblebee_n * _bumblebee_page_size + pop_pg_idx*_bumblebee_page_size + blk_offset*_bumblebee_blk_size;
+						// Address ld_hbm_address = (access_address / 64 / _mem_hbm_per_mc * 64) | (access_address % 64);
+						// uint32_t mem_hbm_select = (access_address / 64)  % _mem_hbm_per_mc;
+						// req.lineAddr = ld_hbm_address;
+						// req.cycle = _mcdram[mem_hbm_select]->access(req,0,4);
+						// req.lineAddr = tmpAddr;
 						
 						pleEntry.PLE[pop_pg_idx] = page_offset;
 						pleEntry.Occupy[pop_pg_idx] = 1;
@@ -2358,7 +2371,7 @@ MemoryController::bumblebee_access(MemReq& req)
 
 						assert(-1 != get_dest_idx);
 
-						if(-1 != get_dest_idx) // no need
+						if(-1 != get_dest_idx)
 						{
 							for(int i = 0; i < blk_per_page ; i++)
 							{
@@ -2374,6 +2387,13 @@ MemoryController::bumblebee_access(MemReq& req)
 							pleEntry.Occupy[get_dest_idx] = 1;
 							pleEntry.Type[get_dest_idx] = 0; // trivial code
 						}
+						else 
+						{
+							// 加过assert，是不会走到这里的
+							std::cout << "Corner Case Occurs !" << std::endl;
+							// 如果去掉assert，触发了cout，此处就需要打补丁
+						}
+
 						
 						// 确认一下hotTracker的参数
 						hotTrackerState(hotTracker,pleEntry);
@@ -2404,7 +2424,7 @@ MemoryController::bumblebee_access(MemReq& req)
 						{
 							Address dest_ddr =  _mem_hbm_size + set_id*bumblebee_m*_bumblebee_page_size +(get_dest_idx-bumblebee_n)*_bumblebee_page_size + blk_offset*_bumblebee_blk_size;
 							MemReq alloc_req =  {dest_ddr, PUTX, req.childId,&state,req.cycle, req.childLock, req.initialState, req.srcId, req.flags};
-							req.cycle = _ext_dram->access(alloc_req,0,4); 
+							req.cycle = _ext_dram->access(alloc_req,0,4);
 
 							pleEntry.PLE[get_dest_idx] = page_offset;
 							pleEntry.Occupy[get_dest_idx] = 1;

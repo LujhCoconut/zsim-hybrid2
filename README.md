@@ -15,6 +15,7 @@ The 3.0.1 version of Zsim-Hybrid2 is released. Version 3.0.1 is a more stable re
 2. Continued optimizing the code for migrating and evicting data, exploring the parallelism between migration, eviction, and access, and optimizing the execution order and structure of the code accordingly.
 
 **IPC Test**
+
 The same as IPC Test with v1.0.1.
 
 In the experimental testing of version v2.0.1, we used DDR-2400 as NM, HBM-2000 as FM, and Sys Frequency = 3400. Using deepsjeng from SPEC CPU2017 as the dataset, the experimental performance of hybrid-v2.0.1 was observed to be between that of pure DRAM and pure HBM.

@@ -1,4 +1,4 @@
-# Zsim-Hybrid2 [Current Version 3.0.1]
+# Zsim-Hybrid2 [Current Version 3.0.2]
 
 This project aims to reproduce the **HPCA'2020** paper `"Hybrid2: Combining Caching and Migration in Hybrid Memory Systems"` using ZSim. The project is implemented based on the open-source Banshee project. 
 
@@ -8,6 +8,7 @@ The link to the open-source Banshee project is `https://github.com/yxymit/banshe
 |CPU Cores|L1 iCache|L1 dCache|L2 Cache|L3 Cache|Benchmarks|
 |-|-|-|-|-|-|
 |4 OOO-Cores|32KB Per Core|32KB Per Core|128 KB Total|4MB Total , 27ns Latency|SPEC2017,Parsec,GAPBS,NPB|
+
 
 ## v3.0.2
 The 3.0.2 version of Zsim-Hybrid2 is released. Version 3.0.2 is a more stable release. The specific changes in version 3.0.2 are as follows:
@@ -71,7 +72,7 @@ The second version of Zsim-Hybrid2 is released. The project is implemented based
 
 **IPC Test**
 
-In the experimental testing of version v1.0.1, we used DDR-2400 as NM, HBM-2000 as FM, and Sys Frequency = 3400. Using deepsjeng from SPEC CPU2017 as the dataset, the experimental performance of hybrid-v1.0.1 was observed to be between that of pure DRAM and pure HBM.
+In the experimental testing of version v1.0.1, we used DDR-2400 as FM, HBM-2000 as NM, and Sys Frequency = 3400. Using deepsjeng from SPEC CPU2017 as the dataset, the experimental performance of hybrid-v1.0.1 was observed to be between that of pure DRAM and pure HBM.
 
 ```python
     if(tech == "HBM-2000"){

@@ -470,7 +470,10 @@ public:
 
 	void hotTrackerState(HotnenssTracker& hotTracker,PLEEntry& pleEntry);
 
-	// ----------------------------------------------------------
+	// -----------------------------DCache Configurations-----------------------------
+
+
+	// -------------------------------End DCache Configurations-------------------------------
 
 	uint64_t getNumRequests() { return _num_requests; };
    	uint64_t getNumSets()     { return _num_sets; };

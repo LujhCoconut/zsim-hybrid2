@@ -33,6 +33,7 @@
 #include "event_recorder.h"
 #include "timing_event.h"
 #include "zsim.h"
+#include <iostream>
 // #include<iostream>
 
 //#define DEBUG(args...) info(args)
@@ -269,6 +270,8 @@ uint64_t DDRMemory::access(MemReq& req, int type, uint32_t data_size) {
         bool isWrite = (req.type == PUTX);
 		// TODO If length > 1 cacheline, add 4 cycle for each cacheline
         uint64_t respCycle = req.cycle + (isWrite? minWrLatency : minRdLatency) + memToSysCycle(data_size - 1);
+        // uint64_t latency_test = (isWrite? minWrLatency : minRdLatency) + memToSysCycle(data_size - 1);
+        // std::cout << latency_test << std::endl;
         if (zinfo->eventRecorders[req.srcId]) {
 			// accessing multiple lines is modeled as multiple requests.
 			// All the requests can be processed in parallel.
@@ -279,6 +282,10 @@ uint64_t DDRMemory::access(MemReq& req, int type, uint32_t data_size) {
             {
             	memEv->setMinStartCycle(req.cycle);
 				TimingRecord tr = {req.lineAddr, req.cycle, respCycle, req.type, memEv, memEv};
+                if(zinfo->eventRecorders[req.srcId]->hasRecord())
+                {
+                    std::cout << "Assertion failed: req.lineAddr = " << req.lineAddr <<std::endl;
+                }
 				assert(!zinfo->eventRecorders[req.srcId]->hasRecord());
            	 	zinfo->eventRecorders[req.srcId]->pushRecord(tr);
 			} else if (type == 1) { // append the current event to the end of the previous one
@@ -307,6 +314,21 @@ uint64_t DDRMemory::access(MemReq& req, int type, uint32_t data_size) {
         return respCycle;
     }
 }
+
+uint64_t
+DDRMemory::rd_dram_tag_latency(MemReq& req, uint32_t data_size)
+{
+    return std::log2(int(minRdLatency + memToSysCycle(data_size - 1)));
+}
+
+uint64_t
+DDRMemory::wt_dram_tag_latency(MemReq& req, uint32_t data_size)
+{
+    return std::log2(int(minWrLatency + memToSysCycle(data_size - 1)));
+}
+
+
+
 
 /* Weave phase functionality */
 
@@ -720,7 +742,51 @@ void DDRMemory::initTech(const char* techName, double time_scale) {
     // tBL's below are for 64-byte lines; we adjust as needed
 
     // Please keep this orderly; go from faster to slower technologies
-    if(tech == "HBM-1000-CL7"){
+    if(tech == "HBM-2000"){
+        tCK = 1;
+        tBL = 4;
+        tCL = uint32_t(18 / time_scale);
+        tRCD = uint32_t( 12 / time_scale);
+        tRTP = uint32_t( 5 / time_scale);
+        tRP = uint32_t( 14 / time_scale);
+        tRRD = uint32_t( 5 / time_scale); // 4+6/2
+        tRAS = uint32_t( 28 / time_scale);
+        tFAW = uint32_t( 15 / time_scale);
+        tWTR = uint32_t( 4 / time_scale);// 4/12
+        tWR = uint32_t( 14 / time_scale);
+        tRFC = uint32_t( 220 / time_scale);
+        tREFI = uint32_t(3900/ time_scale);
+    }else if(tech == "DDR5-4400"){
+        tCK = 0.454;
+        tBL = 8;
+        tCL = uint32_t(14 / time_scale);
+        tRCD = uint32_t( 14 / time_scale);
+        tRTP = uint32_t( 8 / time_scale);
+        tRP = uint32_t( 14 / time_scale);
+        tRRD = uint32_t( 4 / time_scale); // 4+6/2
+        tRAS = uint32_t( 32 / time_scale);
+        tFAW = uint32_t( 14 / time_scale);
+        tWTR = uint32_t( 20 / time_scale);// 4/12
+        tWR = uint32_t( 30 / time_scale);
+        tRFC = uint32_t( 295 / time_scale);
+        tREFI = uint32_t(3900/ time_scale);
+    }
+    else if(tech == "DDR-2400"){
+        tCK = 0.833;
+        tBL = 8;
+        tCL = uint32_t(14 / time_scale);
+        tRCD = uint32_t( 14 / time_scale);
+        tRTP = uint32_t( 8 / time_scale);
+        tRP = uint32_t( 14 / time_scale);
+        tRRD = uint32_t( 4 / time_scale); // 4+6/2
+        tRAS = uint32_t( 32 / time_scale);
+        tFAW = uint32_t( 15 / time_scale);
+        tWTR = uint32_t( 5 / time_scale);// 4/12
+        tWR = uint32_t( 15 / time_scale);
+        tRFC = uint32_t( 350 / time_scale);
+        tREFI = uint32_t(7800/ time_scale);
+    }
+    else if(tech == "HBM-1000-CL7"){
         tCK = 2;
         // tBL = BL  * tCK
         tBL = 8;

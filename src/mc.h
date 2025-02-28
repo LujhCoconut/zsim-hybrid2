@@ -5,10 +5,12 @@
 #include "g_std/g_string.h"
 #include "memory_hierarchy.h"
 #include <string>
+#include <iostream>
 #include "stats.h"
 #include "g_std/g_unordered_map.h"
 #include "g_std/g_vector.h"
 #include "g_std/g_list.h"
+#include <vector>
 // #include <unordered_map>
 
 #define MAX_STEPS 10000
@@ -32,7 +34,9 @@ enum Scheme
    Chameleon,
    Bumblebee,
    CacheMode,
-   DirectFlat
+   DirectFlat,
+   DCache, // Our proposed
+   BATMAN
 };
 
 class Way
@@ -121,6 +125,7 @@ private:
 
 	// Trace related code
 	lock_t _lock;
+	lock_t _remap_lock;
 	bool _collect_trace;
 	g_string _trace_dir;
 	Address _address_trace[10000];
@@ -137,6 +142,10 @@ public:
 	MemObject ** _mcdram;
 	uint32_t _mcdram_per_mc;
 	g_string _mcdram_type;
+
+	// test flat access
+	g_vector<uint64_t> _flat_access_cntr;
+	uint64_t _flat_access_print_time = 0;
 	// ----------------------------------------------------------
 	//Hybrid2[HPCA'20] Reproduce
 	// DDRMemory * test_mem;
@@ -318,7 +327,62 @@ public:
 	int get_segment_num(Address addr); // hbm 0; ddr 1 - n;
 	
 
+	// add by RL
+	uint64_t global_memory_size;
+
+
+	
+
 	// ----------------------------------------------------------
+	// BATMAN-Flat [MemSys'17]
+	const static int batman_ddr_ratio = 8;
+	struct batman_set{ // occupy/remap_idx 128KB in SRAM
+		int occupy; // only 0 & 1 are used, which indicates whether Exact HBM Page is occupied
+		uint64_t cntr; // indicates HBM Page cntr
+		// 直接就是对应offset的cntr 与idx无关
+		uint64_t init_hbm_cntr; 
+		g_vector<uint64_t> dram_pages_cntr; // 实际页面对应的热度 0-7 DRAM 8 HBM
+		g_vector<int> bat_set_idx;  // remap 0-7 DRAM 8 HBM
+		g_vector<g_vector<int>> validBitMap;
+		int remap_idx; //  -1 => 8
+
+		batman_set(int _occupy = 0, int _cntr = 0,int _ihcntr = 0, int _r_idx = 8):occupy(_occupy),cntr(_cntr),init_hbm_cntr(_ihcntr),remap_idx(_r_idx)
+		{
+			for(int i = 0 ;i <= batman_ddr_ratio; i++)
+			{
+				dram_pages_cntr.push_back(0);
+				if(i != batman_ddr_ratio)bat_set_idx.push_back(i);
+				else bat_set_idx.push_back(8); // static var will cause undefined symbol when linking
+			}
+
+			for(int i = 0;i <= batman_ddr_ratio;i++) // 0-7 DRAM 8 HBM
+			{
+				g_vector<int> validBitVector;
+				for(int j = 0;j < blk_per_page;j++)
+				{
+					validBitVector.push_back(0);
+				}
+				validBitMap.push_back(validBitVector);
+			}
+		}
+	};
+
+	int batman_set_nums;
+
+	float TAR = 0.8; // bd_hbm : bd_ddr = 4 : 1
+	float guard_band = 0.02; // align with the paper
+	uint64_t bt_hot = 10;
+	uint64_t  lst_md_cycle;
+	uint32_t _batman_blk_size;
+	uint32_t _batman_page_size;
+
+	int nm_access;
+	int total_access;
+	float current_tar;
+
+	g_vector<batman_set> b_sets;
+	
+	
 	// Bumblebee[DAC'23] Reproduce
 
 	// notes:
@@ -470,10 +534,8 @@ public:
 
 	void hotTrackerState(HotnenssTracker& hotTracker,PLEEntry& pleEntry);
 
-	// -----------------------------DCache Configurations-----------------------------
 
-
-	// -------------------------------End DCache Configurations-------------------------------
+	
 
 	uint64_t getNumRequests() { return _num_requests; };
    	uint64_t getNumSets()     { return _num_sets; };
@@ -562,6 +624,7 @@ public:
 	uint64_t bumblebee_access(MemReq& req);
 	uint64_t hybrid2_access(MemReq& req);
 	uint64_t direct_flat_access(MemReq& req);
+	uint64_t batman_access(MemReq& req);
 	uint64_t access(MemReq& req);
 	const char * getName() { return _name.c_str(); };
 	void initStats(AggregateStat* parentStat); 

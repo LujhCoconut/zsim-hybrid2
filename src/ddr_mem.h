@@ -33,6 +33,7 @@
 #include "memory_hierarchy.h"
 #include "pad.h"
 #include "stats.h"
+#include<cmath>
 
 
 /* Helper data structures */
@@ -268,11 +269,17 @@ class DDRMemory : public MemObject {
         void initStats(AggregateStat* parentStat);
         const char* getName() {return name.c_str();}
 
+
+        uint64_t rd_dram_tag_latency(MemReq& req, uint32_t data_size = 2);
+        uint64_t wt_dram_tag_latency(MemReq& req, uint32_t data_size = 2);
+
         // Bound phase interface
 		// data_size is the number of bursts with burst length = 16 bytes.
 		// A cacheline takes 4 bursts
         uint64_t access(MemReq& req, int type, uint32_t data_size = 4);
         uint64_t access(MemReq& req) { return access(req, 0, 4); };
+
+
 
         // Weave phase interface
         void enqueue(DDRMemoryAccEvent* ev, uint64_t cycle);

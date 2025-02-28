@@ -1,4 +1,4 @@
-# Zsim-Hybrid2 [Current Version 3.0.2]
+# Zsim-Hybrid2 [Current Version 3.0.3]
 
 This project aims to reproduce the **HPCA'2020** paper `"Hybrid2: Combining Caching and Migration in Hybrid Memory Systems"` using ZSim. The project is implemented based on the open-source Banshee project. 
 
@@ -9,6 +9,11 @@ The link to the open-source Banshee project is `https://github.com/yxymit/banshe
 |-|-|-|-|-|-|
 |4 OOO-Cores|32KB Per Core|32KB Per Core|128 KB Total|4MB Total , 27ns Latency|SPEC2017,Parsec,GAPBS,NPB|
 
+
+## v3.0.3
+The 3.0.3 version of Zsim-Hybrid2 is released. Version 3.0.3 is a more stable release. The specific changes in version 3.0.3 are as follows:
+1. Fixed a critical bug in address mapping
+2. added latency information specifically for handling metadata access in ddr_mem.cpp. `rd_dram_tag_latency` & `wt_dram_tag_latency`
 
 ## v3.0.2
 The 3.0.2 version of Zsim-Hybrid2 is released. Version 3.0.2 is a more stable release. The specific changes in version 3.0.2 are as follows:
